@@ -1,0 +1,239 @@
+"""
+توليد تقرير جنائي مستقل (HTML قابل للطباعة/التصدير كـ PDF من المتصفح) + ملخص نصي.
+التقرير يحتوي الأدلة الخام (بصمات، إزاحات بايتية، قيم إحصائية) ليكون قابلًا للتدقيق.
+"""
+from __future__ import annotations
+
+import html
+import json
+from datetime import datetime, timezone
+
+
+def _esc(x) -> str:
+    return html.escape(str(x)) if x is not None else ""
+
+
+def _kv_table(d: dict, cols=("المفتاح", "القيمة")) -> str:
+    if not d:
+        return "<p class='muted'>لا توجد بيانات.</p>"
+    rows = []
+    for k, v in d.items():
+        if isinstance(v, dict) and "value" in v and "source" in v:
+            rows.append(f"<tr><td>{_esc(k)}</td><td>{_esc(_short(v['value']))}</td>"
+                        f"<td class='src'>{_esc(v['source'])}</td></tr>")
+        else:
+            rows.append(f"<tr><td>{_esc(k)}</td><td colspan='2'>{_esc(_short(v))}</td></tr>")
+    return (f"<table><thead><tr><th>{cols[0]}</th><th>{cols[1]}</th><th>المصدر</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>")
+
+
+def _short(v, n: int = 400) -> str:
+    if isinstance(v, (dict, list)):
+        s = json.dumps(v, ensure_ascii=False)
+    else:
+        s = str(v)
+    return s if len(s) <= n else s[:n] + " …"
+
+
+SEV_CLASS = {"حرجة": "critical", "عالية": "high", "متوسطة": "medium",
+             "منخفضة": "low", "معلوماتية": "info"}
+
+
+def html_report(rep: dict, case: dict | None = None, evidence: dict | None = None,
+                custody: list | None = None, artifacts_base: str = "") -> str:
+    ev = rep.get("evidence", {})
+    fp = rep.get("fingerprints", {})
+    asmt = rep.get("assessment", {})
+    t = rep.get("type", {})
+
+    findings = "".join(
+        f"<div class='finding {SEV_CLASS.get(f['severity'], 'info')}'>"
+        f"<div class='fh'><span class='sev'>{_esc(f['severity'])}</span>"
+        f"<strong>{_esc(f['title'])}</strong><span class='w'>وزن {f['weight']}</span></div>"
+        f"<p>{_esc(f['detail'])}</p><code>{_esc(f['evidence'])}</code></div>"
+        for f in asmt.get("findings", []))
+    if not findings:
+        findings = "<p class='muted'>لم تُرصد مؤشرات.</p>"
+
+    tl = rep.get("timeline", {})
+    tl_rows = "".join(
+        f"<tr><td>{_esc(e.get('parsed'))}</td><td>{_esc(e.get('label'))}</td>"
+        f"<td class='src'>{_esc(e.get('source'))}</td></tr>" for e in tl.get("events", []))
+    conflicts = "".join(f"<li><b>{_esc(c['severity'])}:</b> {_esc(c['issue'])}</li>"
+                        for c in tl.get("conflicts", []))
+
+    rec = rep.get("recovery", {})
+    rec_html = ""
+    for frag in rec.get("exif_fragments", []):
+        rec_html += (f"<h4>شظية EXIF عند الإزاحة {frag['offset']} "
+                     f"({_esc(frag.get('container'))}) — {frag['fields_recovered']} حقلًا</h4>"
+                     + _kv_table({k: v for k, v in list(frag["fields"].items())[:80]}))
+        if frag.get("gps"):
+            rec_html += _kv_table(frag["gps"])
+    for pkt in rec.get("xmp_packets", [])[:5]:
+        kf = pkt.get("parsed", {}).get("key_fields", {})
+        rec_html += f"<h4>حزمة XMP عند {pkt['offset']} ({_esc(pkt['kind'])})</h4>" + _kv_table(kf)
+    if rec.get("verdict"):
+        rec_html = "<ul>" + "".join(f"<li>{_esc(v)}</li>" for v in rec["verdict"]) + "</ul>" + rec_html
+    if not rec_html:
+        rec_html = "<p class='muted'>لم يُعثر على آثار وصفية مستعادة.</p>"
+
+    imgf = rep.get("image_forensics", {})
+    imgs = []
+    for key, label in (("preview", "معاينة الدليل"),):
+        if imgf.get(key):
+            imgs.append((label, imgf[key]))
+    for sec, key, label in (("ela", "image", "تحليل مستوى الخطأ ELA"),
+                            ("noise", "noise_map", "خريطة الضجيج"),
+                            ("noise", "residual_image", "بقايا الضجيج"),
+                            ("thumbnail_check", "thumbnail_image", "المصغّرة المدمجة"),
+                            ("thumbnail_check", "diff_image", "فرق المصغّرة عن الصورة")):
+        v = (imgf.get(sec) or {}).get(key)
+        if v:
+            imgs.append((label, v))
+    for c, f in ((imgf.get("steganalysis") or {}).get("bit_plane_images") or {}).items():
+        imgs.append((f"مستوى البت الأدنى — القناة {c}", f))
+    gallery = "".join(
+        f"<figure><img src='{artifacts_base}{_esc(f)}' loading='lazy'><figcaption>{_esc(l)}</figcaption></figure>"
+        for l, f in imgs)
+
+    carved = rep.get("carving", [])
+    carved_rows = "".join(
+        f"<tr><td>{_esc(c['type'])}</td><td>{_esc(c.get('description'))}</td>"
+        f"<td>{c['offset']}</td><td>{_esc(c.get('size'))}</td>"
+        f"<td class='mono'>{_esc((c.get('sha256') or '')[:32])}</td></tr>" for c in carved)
+
+    custody_rows = "".join(
+        f"<tr><td>{r['seq']}</td><td>{_esc(r['ts_utc'])}</td><td>{_esc(r['actor'])}</td>"
+        f"<td>{_esc(r['action'])}</td><td>{_esc(_short(r['details'], 160))}</td>"
+        f"<td class='mono'>{_esc(r['entry_hash'][:16])}…</td></tr>"
+        for r in (custody or []))
+
+    iocs = (rep.get("strings") or {}).get("iocs", {})
+    ioc_html = "".join(
+        f"<h4>{_esc(k)} ({len(v)})</h4><div class='chips'>" +
+        "".join(f"<span class='chip'>{_esc(x)}</span>" for x in v[:60]) + "</div>"
+        for k, v in iocs.items()) or "<p class='muted'>لا توجد مؤشرات.</p>"
+
+    gen = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تقرير جنائي رقمي — {_esc(ev.get('filename'))}</title>
+<style>
+*{{box-sizing:border-box}}
+body{{font-family:"Segoe UI","Noto Naskh Arabic",Tahoma,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px;line-height:1.7}}
+.wrap{{max-width:1100px;margin:auto}}
+h1{{font-size:26px;border-bottom:2px solid #2f81f7;padding-bottom:10px}}
+h2{{font-size:20px;margin-top:34px;color:#58a6ff;border-right:4px solid #2f81f7;padding-right:10px}}
+h4{{color:#8b949e;margin:16px 0 6px}}
+table{{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px;background:#0f1620}}
+th,td{{border:1px solid #21262d;padding:6px 9px;text-align:right;vertical-align:top;word-break:break-word}}
+th{{background:#161b22;color:#8b949e}}
+.mono,code{{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#7ee787;direction:ltr;display:inline-block}}
+.src{{color:#6e7681;font-size:11px}}
+.muted{{color:#6e7681}}
+.score{{display:flex;gap:18px;align-items:center;background:#161b22;border:1px solid #21262d;border-radius:12px;padding:18px;margin:16px 0}}
+.score .num{{font-size:48px;font-weight:bold}}
+.critical{{color:#ff7b72}} .high{{color:#ffa657}} .medium{{color:#e3b341}} .low{{color:#79c0ff}} .clean,.info{{color:#56d364}}
+.finding{{border-right:4px solid;padding:10px 14px;margin:10px 0;background:#11161d;border-radius:6px}}
+.finding.critical{{border-color:#ff7b72}} .finding.high{{border-color:#ffa657}}
+.finding.medium{{border-color:#e3b341}} .finding.low{{border-color:#79c0ff}} .finding.info{{border-color:#56d364}}
+.fh{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
+.sev{{font-size:11px;padding:2px 8px;border-radius:20px;background:#21262d}}
+.w{{margin-right:auto;font-size:11px;color:#6e7681}}
+figure{{margin:0;background:#0f1620;border:1px solid #21262d;border-radius:8px;padding:8px}}
+figure img{{width:100%;border-radius:4px}}
+figcaption{{font-size:12px;color:#8b949e;text-align:center;padding-top:6px}}
+.gallery{{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}}
+.chips{{display:flex;flex-wrap:wrap;gap:6px}}
+.chip{{background:#161b22;border:1px solid #21262d;border-radius:20px;padding:2px 10px;font-size:12px;direction:ltr}}
+.hdr{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}}
+.card{{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:12px}}
+.card b{{display:block;color:#8b949e;font-size:12px;font-weight:normal}}
+footer{{margin-top:40px;border-top:1px solid #21262d;padding-top:14px;font-size:12px;color:#6e7681}}
+@media print{{body{{background:#fff;color:#000}} .card,table,figure{{background:#fff}} h2{{color:#000}}}}
+</style></head><body><div class="wrap">
+<h1>⚖️ تقرير فحص جنائي رقمي — منظومة مِرصاد</h1>
+<div class="hdr">
+  <div class="card"><b>اسم الملف</b>{_esc(ev.get('filename'))}</div>
+  <div class="card"><b>الحجم</b>{_esc(ev.get('size_human'))} ({_esc(ev.get('size_bytes'))} بايت)</div>
+  <div class="card"><b>النوع الحقيقي</b>{_esc(t.get('description'))} — {_esc(t.get('mime'))}</div>
+  <div class="card"><b>وقت التحليل (UTC)</b>{_esc(ev.get('analyzed_at_utc'))}</div>
+  {"<div class='card'><b>رقم القضية</b>" + _esc(case.get('number')) + "</div>" if case else ""}
+  {"<div class='card'><b>المحقق</b>" + _esc(case.get('investigator')) + "</div>" if case else ""}
+  {"<div class='card'><b>معرّف الدليل</b><span class='mono'>" + _esc(evidence.get('id')) + "</span></div>" if evidence else ""}
+</div>
+
+<h2>1. الخلاصة التنفيذية</h2>
+<div class="score"><div class="num {_esc(asmt.get('level_class'))}">{_esc(asmt.get('suspicion_score'))}</div>
+<div><b>مؤشر الشبهة من 100:</b> <span class="{_esc(asmt.get('level_class'))}">{_esc(asmt.get('level'))}</span><br>
+<span class="muted">عدد المؤشرات المرصودة: {_esc(asmt.get('findings_count'))}</span></div></div>
+<p class="muted">{_esc(asmt.get('disclaimer'))}</p>
+
+<h2>2. المؤشرات المرصودة والأدلة المساندة</h2>
+{findings}
+
+<h2>3. البصمات الرقمية (سلامة الدليل)</h2>
+{_kv_table({k: v for k, v in fp.items()})}
+
+<h2>4. تعريف نوع الملف</h2>
+{_kv_table({k: v for k, v in t.items() if k != 'pe'})}
+
+<h2>5. البيانات الوصفية المستخرجة</h2>
+{_kv_table(rep.get('metadata', {}))}
+
+<h2>6. استرجاع البيانات الوصفية الممسوحة</h2>
+{rec_html}
+
+<h2>7. الخط الزمني</h2>
+{"<ul>" + conflicts + "</ul>" if conflicts else ""}
+<table><thead><tr><th>التاريخ/الوقت</th><th>الحدث</th><th>المصدر</th></tr></thead><tbody>{tl_rows}</tbody></table>
+
+<h2>8. التحليل الإحصائي والعشوائية</h2>
+{_kv_table({k: v for k, v in (rep.get('entropy') or {}).items() if k not in ('map', 'anomalies')})}
+
+<h2>9. تحليل الصورة الجنائي</h2>
+<div class="gallery">{gallery or "<p class='muted'>لا توجد مخرجات بصرية.</p>"}</div>
+{_kv_table({k: _short(v, 300) for k, v in (imgf.get('basic') or {}).items()})}
+
+<h2>10. الملفات المنحوتة والمدمجة</h2>
+<table><thead><tr><th>النوع</th><th>الوصف</th><th>الإزاحة</th><th>الحجم</th><th>SHA-256</th></tr></thead>
+<tbody>{carved_rows or "<tr><td colspan='5' class='muted'>لا شيء</td></tr>"}</tbody></table>
+
+<h2>11. المؤشرات النصية المستخرجة (IOC)</h2>
+{ioc_html}
+
+<h2>12. سلسلة الحيازة</h2>
+<table><thead><tr><th>#</th><th>الوقت (UTC)</th><th>الفاعل</th><th>الإجراء</th><th>التفاصيل</th><th>بصمة القيد</th></tr></thead>
+<tbody>{custody_rows or "<tr><td colspan='6' class='muted'>لا توجد قيود</td></tr>"}</tbody></table>
+
+<footer>
+تقرير مُولَّد آليًا بواسطة <b>مِرصاد</b> — منظومة التحقيق الجنائي الرقمي · وقت التوليد: {gen} ·
+جميع القيم الواردة مقيسة مباشرة من بايتات الدليل ويمكن إعادة التحقق منها باستخدام نفس الأدوات المفتوحة.
+</footer>
+</div></body></html>"""
+
+
+def text_summary(rep: dict) -> str:
+    a = rep.get("assessment", {})
+    ev = rep.get("evidence", {})
+    lines = [
+        "=" * 64,
+        f"مِرصاد — ملخص الفحص الجنائي: {ev.get('filename')}",
+        "=" * 64,
+        f"الحجم: {ev.get('size_human')} | النوع: {(rep.get('type') or {}).get('description')}",
+        f"SHA-256: {(rep.get('fingerprints') or {}).get('sha256')}",
+        f"مؤشر الشبهة: {a.get('suspicion_score')}/100 — {a.get('level')}",
+        "-" * 64,
+    ]
+    for f in a.get("findings", []):
+        lines.append(f"[{f['severity']}] {f['title']}: {f['detail']}")
+        lines.append(f"    الدليل: {f['evidence']}")
+    md = rep.get("metadata") or {}
+    if md:
+        lines.append("-" * 64)
+        lines.append("أبرز البيانات الوصفية:")
+        for k, v in list(md.items())[:40]:
+            lines.append(f"  {k} = {_short(v.get('value') if isinstance(v, dict) else v, 120)}")
+    return "\n".join(lines)
