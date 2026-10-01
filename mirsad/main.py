@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .core import analyzer, hashing, prnu as prnu_mod, report as report_mod
+from .core import analyzer, hashing, prnu as prnu_mod, qtables as qtables_mod, report as report_mod
 from .core.case import CaseStore
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +24,12 @@ MAX_UPLOAD = int(os.environ.get("MIRSAD_MAX_UPLOAD_MB", "512")) * 1024 * 1024
 
 store = CaseStore(DATA_ROOT)
 cameras = prnu_mod.CameraRegistry(os.path.join(DATA_ROOT, "prnu_cameras"))
+SIGDB_USER = os.path.join(DATA_ROOT, "jpeg_signatures_user.json")
+
+
+def sigdb() -> qtables_mod.SignatureDB:
+    """تُقرأ القاعدة في كل طلب حتى تظهر الإضافات الجديدة فورًا."""
+    return qtables_mod.SignatureDB(user_path=SIGDB_USER)
 app = FastAPI(title="مِرصاد — منظومة التحقيق الجنائي الرقمي", version="1.0.0",
               description="تحليل جنائي رقمي حقيقي للملفات: بصمات، ميتاداتا، استرجاع، تزوير، إخفاء.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -100,7 +106,7 @@ async def analyze_upload(file: UploadFile = File(...),
                              file.content_type or "", actor, source_note)
     artifacts = store.artifacts_dir(eid)
     rep = analyzer.analyze(data, file.filename or "evidence.bin", artifacts, deep=deep,
-                           prnu_registry=cameras)
+                           prnu_registry=cameras, signature_db=sigdb())
     rep["evidence"]["evidence_id"] = eid
     rep["evidence"]["case_id"] = cid
     store.save_report(eid, rep)
@@ -108,6 +114,55 @@ async def analyze_upload(file: UploadFile = File(...),
               f"مؤشر الشبهة: {(rep.get('assessment') or {}).get('suspicion_score')} | "
               f"عدد المؤشرات: {(rep.get('assessment') or {}).get('findings_count')}")
     return JSONResponse(rep)
+
+
+# ------------------------------------------- قاعدة بصمات الضغط (جداول التكميم)
+
+@app.get("/api/signatures")
+def sig_list() -> dict:
+    db = sigdb()
+    return {"count": len(db.entries), "signatures": db.list()}
+
+
+@app.post("/api/signatures/learn")
+async def sig_learn(source: str = Form(...),
+                    provenance: str = Form(...),
+                    notes: str = Form(""),
+                    file: UploadFile = File(...)) -> JSONResponse:
+    """
+    تعلّم بصمة ضغط من عيّنة مرجعية موثّقة.
+
+    `provenance` إلزامي: من أين أتت العيّنة بالضبط (جهاز بحوزة المحقق، تطبيق
+    بإصدار معيّن…). بلا توثيق المصدر لا قيمة قضائية للنسبة.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "الملف فارغ")
+    from .core import jpeg as jpeg_mod
+    jp = jpeg_mod.parse(data)
+    if not jp.get("is_jpeg"):
+        raise HTTPException(400, "العيّنة ليست ملف JPEG")
+    res = sigdb().learn(jp, source, provenance, notes)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("reason", "تعذّر التسجيل"))
+    store.log(None, None, "محقق", "تسجيل بصمة ضغط مرجعية",
+              f"{source} ← {provenance}")
+    return JSONResponse(res)
+
+
+@app.delete("/api/signatures/{full_signature}")
+def sig_delete(full_signature: str) -> dict:
+    return {"deleted": sigdb().delete(full_signature)}
+
+
+@app.post("/api/signatures/identify")
+async def sig_identify(file: UploadFile = File(...)) -> JSONResponse:
+    data = await file.read()
+    from .core import jpeg as jpeg_mod
+    jp = jpeg_mod.parse(data)
+    if not jp.get("is_jpeg"):
+        raise HTTPException(400, "ليس ملف JPEG")
+    return JSONResponse(analyzer.jsonable(qtables_mod.analyze(jp, sigdb())))
 
 
 # ----------------------------------------------- سجل بصمات الكاميرات (PRNU)

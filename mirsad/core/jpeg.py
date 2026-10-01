@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import struct
 import zlib
 from . import exif as exif_mod
@@ -57,9 +58,22 @@ STD_CHROMA = [
     99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99]
 
 
+# ترتيب الزجزاج: جداول DQT تُخزَّن به داخل الملف بينما جداول Annex K أعلاه صفّية
+ZIGZAG_ORDER = [
+    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5,
+    12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
+    58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]
+
+
 def estimate_quality(qt: list[int], chroma: bool = False) -> float:
-    """تقدير جودة libjwpeg من جدول التكميم (معادلة مقياس IJG العكسية)."""
+    """تقدير جودة libjpeg من جدول التكميم (معادلة مقياس IJG العكسية)."""
     std = STD_CHROMA if chroma else STD_LUMA
+    if len(qt) >= 64:                       # فكّ ترتيب الزجزاج قبل المقارنة
+        raster = [0] * 64
+        for i, pos in enumerate(ZIGZAG_ORDER):
+            raster[pos] = qt[i]
+        qt = raster
     scales = []
     for q, s in zip(qt, std):
         if q <= 0:
@@ -85,6 +99,7 @@ def parse(data: bytes) -> dict:
     n = len(data)
     sos_end = None
     dqt_tables: list[dict] = []
+    dht_tables: list[dict] = []
     dht_count = 0
     while i < n - 1:
         if data[i] != 0xFF:
@@ -138,6 +153,23 @@ def parse(data: bytes) -> dict:
             seg["tables"] = len(dqt_tables)
         elif name == "DHT":
             dht_count += 1
+            # تشريح كامل لجداول هوفمان: بصمتها جزء أصيل من توقيع المُرمِّز
+            # (الكاميرات تستخدم الجداول القياسية، وبرامج التحرير غالبًا تُحسّنها)
+            q = 0
+            while q + 17 <= len(payload):
+                tc_th = payload[q]
+                tcls, tid = tc_th >> 4, tc_th & 15
+                counts = list(payload[q + 1:q + 17])
+                total = sum(counts)
+                if q + 17 + total > len(payload) or total > 256:
+                    break
+                symbols = list(payload[q + 17:q + 17 + total])
+                dht_tables.append({
+                    "class": "DC" if tcls == 0 else "AC", "table_id": tid,
+                    "codes_per_length": counts, "symbol_count": total,
+                    "sha1": hashlib.sha1(bytes(counts) + bytes(symbols)).hexdigest()[:16],
+                })
+                q += 17 + total
         elif name.startswith("SOF"):
             if len(payload) >= 6:
                 prec = payload[0]
@@ -172,6 +204,7 @@ def parse(data: bytes) -> dict:
             sos_end = j
     out["quant_tables"] = dqt_tables
     out["huffman_tables_segments"] = dht_count
+    out["huffman_tables"] = dht_tables
     if dqt_tables:
         out["estimated_jpeg_quality"] = max(t["estimated_quality"] for t in dqt_tables)
         out["quant_fingerprint"] = "-".join(t["crc32"] for t in dqt_tables)

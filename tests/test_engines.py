@@ -321,6 +321,108 @@ def main() -> int:
                   if "PRNU" in f["title"]))
         check("حذف الكاميرا من السجل", reg.delete("cam_a") and reg.list() == [])
 
+    print("\n=== 15. بصمة الضغط وجداول التكميم ===")
+    import tempfile as _tf2
+    from mirsad.core import qtables as QT
+    from mirsad.core import jpeg as JP
+    from mirsad.core.jpeg import STD_LUMA as _SL, STD_CHROMA as _SC
+
+    def _enc(im, **kw):
+        """ترميز إلى ملف مؤقّت (مسار الذاكرة في Pillow يفشل مع بعض التوليفات)."""
+        pth = os.path.join(TMP, "enc_tmp.jpg")
+        im.save(pth, "JPEG", **kw)
+        with open(pth, "rb") as fh:
+            return fh.read()
+
+    _img = Image.fromarray(
+        (np.random.default_rng(4).random((128, 128, 3)) * 180 + 40).astype("uint8"))
+
+    # (أ) مطابقة معادلة IJG لمخرجات libjpeg الفعلية عند كل جودة
+    mism = []
+    for qq in range(1, 101):
+        jpx = JP.parse(_enc(_img, quality=qq, subsampling=2))
+        for t in jpx["quant_tables"]:
+            e = QT.quality_of_table(t["values"], chroma=t["table_id"] != 0)
+            if not e["exact_ijg_match"]:
+                mism.append((qq, t["table_id"], e["max_deviation"]))
+            elif e["quality"] != qq and not e.get("ambiguous"):
+                mism.append((qq, t["table_id"], "quality=" + str(e["quality"])))
+    check("معادلة تدرّج IJG تطابق libjpeg في كل الجودات 1..100 (جدولان)",
+          not mism, str(mism[:5]))
+
+    # (ب) فكّ ترتيب الزجزاج (أساس صحة كل ما سبق)
+    zz = QT.from_zigzag(list(range(64)))
+    check("فكّ ترتيب الزجزاج يعيد الموضع الصحيح",
+          zz[0] == 0 and zz[1] == 1 and zz[8] == 2 and zz[16] == 3, str(zz[:9]))
+    check("جدول Annex K المرجعي يطابق مخرجات libjpeg عند الجودة 50",
+          QT.ijg_scale(_SL, 50) == _SL and QT.ijg_scale(_SC, 50) == _SC)
+
+    # (ج) بصمات جداول هوفمان القياسية مُعاد توليدها لا محفوظة اعتباطًا
+    jp_std = JP.parse(_enc(_img, quality=80, optimize=False))
+    regen = {f"{h['class']}{h['table_id']}": h["sha1"] for h in jp_std["huffman_tables"]}
+    check("بصمات هوفمان القياسية المخزَّنة = المُولَّدة من libjpeg الآن",
+          regen == QT.STD_HUFFMAN_SHA1, str(regen))
+    sig_std = QT.compression_signature(jp_std)
+    check("رصد جداول هوفمان القياسية", sig_std["huffman_standard"])
+    jp_opt = JP.parse(_enc(_img, quality=80, optimize=True))
+    check("رصد جداول هوفمان المُحسَّنة",
+          QT.compression_signature(jp_opt)["huffman_optimized"])
+
+    # (د) البصمة خاصية للمُرمِّز لا للمحتوى
+    img2 = Image.fromarray(
+        (np.random.default_rng(55).random((96, 160, 3)) * 255).astype("uint8"))
+    a = QT.compression_signature(JP.parse(_enc(_img, quality=77, subsampling=2)))
+    b = QT.compression_signature(JP.parse(_enc(img2, quality=77, subsampling=2)))
+    check("نفس الإعدادات + صورتان مختلفتان ⇒ نفس التوقيع الكامل",
+          a["full_signature"] == b["full_signature"])
+    c2 = QT.compression_signature(JP.parse(_enc(_img, quality=78, subsampling=2)))
+    check("تغيير الجودة درجة واحدة ⇒ توقيع مختلف",
+          a["full_signature"] != c2["full_signature"])
+    d2 = QT.compression_signature(JP.parse(_enc(_img, quality=77, subsampling=0)))
+    check("تغيير تخفيض اللون ⇒ توقيع مختلف مع بقاء جداول التكميم",
+          d2["full_signature"] != a["full_signature"]
+          and d2["qt_signature"] == a["qt_signature"])
+
+    # (هـ) قاعدة البصمات المُرفقة والتعلّم
+    db0 = QT.SignatureDB()
+    check("قاعدة البصمات المُرفقة محمّلة", len(db0.entries) >= 50, str(len(db0.entries)))
+    check("كل مُدخَل مُرفق موثّق المصدر (provenance)",
+          all(e.get("provenance") for e in db0.entries))
+    m_known = db0.match(JP.parse(_enc(img2, quality=85, subsampling=2, optimize=False)))
+    check("التعرّف على مُرمِّز معروف من قاعدة البصمات",
+          bool(m_known["exact_matches"]), str(m_known["confidence"]))
+
+    with _tf2.TemporaryDirectory() as _d2:
+        upath = os.path.join(_d2, "user.json")
+        db = QT.SignatureDB(user_path=upath)
+        ref = JP.parse(_enc(_img, quality=71, subsampling=2, optimize=True))
+        got = db.learn(ref, "جهاز اختبار", "عيّنة مُولَّدة محليًا في الاختبار")
+        check("تعلّم بصمة من عيّنة مرجعية", got["ok"])
+        db2 = QT.SignatureDB(user_path=upath)
+        unk = JP.parse(_enc(img2, quality=71, subsampling=2, optimize=True))
+        mm = db2.match(unk)
+        check("مطابقة صورة أخرى بنفس المُرمِّز عبر توقيع الملمح",
+              mm["identified_source"] == "جهاز اختبار", str(mm["confidence"]))
+        mm2 = db2.match(JP.parse(_enc(img2, quality=40, subsampling=0)))
+        check("لا تُنسب صورة مُرمِّزها مختلف إلى الجهاز",
+              mm2.get("identified_source") != "جهاز اختبار", str(mm2.get("identified_source")))
+        check("حذف توقيع المحقق من القاعدة", db2.delete(got["full_signature"]))
+
+    # (و) الاستدلال البنيوي والتكامل مع التقرير
+    prog = QT.analyze(JP.parse(_enc(_img, quality=80, progressive=True)), None)
+    check("رصد الترميز التقدمي كمؤشر إعادة ترميز",
+          any("تقدمي" in f["fact"] for f in prog["structural_inference"]))
+    rep_q = analyzer.analyze(_enc(_img, quality=77, subsampling=2), "q.jpg", TMP,
+                             signature_db=db0)
+    check("بصمة الضغط مدمجة في التقرير بلا أخطاء",
+          rep_q["compression_signature"]["ok"] and not rep_q["errors"],
+          str(rep_q["errors"])[:150])
+    check("الجودة المقيسة في التقرير صحيحة",
+          rep_q["compression_signature"]["quantization"]["quality_estimate"] == 77)
+    check("تحديد المُرمِّز لا يرفع مؤشر الشبهة",
+          all(f["weight"] == 0 for f in rep_q["assessment"]["findings"]
+              if "بصمة الضغط" in f["title"]))
+
     print("\n" + "=" * 60)
     print(f"النتيجة: {len(PASS)} ناجح / {len(FAIL)} فاشل")
     if FAIL:

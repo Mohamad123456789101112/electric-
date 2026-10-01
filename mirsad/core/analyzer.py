@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 
 from . import (carver, containers, documents, entropy, exif as exif_mod, hashing,
                imaging, jpeg as jpeg_mod, jpegdct, makernote as makernote_mod,
-               prnu as prnu_mod, recovery, signatures, strings_, timeline)
+               prnu as prnu_mod, qtables as qtables_mod, recovery, signatures,
+               strings_, timeline)
 
 
 def _try(name: str, fn, errors: list):
@@ -26,7 +27,7 @@ def _try(name: str, fn, errors: list):
 
 
 def analyze(data: bytes, filename: str, artifacts_dir: str,
-            deep: bool = True, prnu_registry=None) -> dict:
+            deep: bool = True, prnu_registry=None, signature_db=None) -> dict:
     t0 = time.time()
     errors: list = []
     rep: dict = {
@@ -94,6 +95,11 @@ def analyze(data: bytes, filename: str, artifacts_dir: str,
 
     # 6) الميتاداتا الموحّدة
     rep["metadata"] = _try("metadata", lambda: _unified_metadata(containers_out), errors) or {}
+
+    # 6-أ) بصمة الضغط وجداول التكميم (تحديد المُرمِّز بلا ميتاداتا)
+    if jp and jp.get("is_jpeg"):
+        rep["compression_signature"] = _try(
+            "qtables", lambda: qtables_mod.analyze(jp, signature_db), errors) or {}
 
     # 6-ب) فكّ MakerNote الخاص بالمصنّع (بصمة الجهاز داخل الميتاداتا)
     mn = _try("makernote", lambda: makernote_mod.analyze(data), errors) or {}
@@ -452,6 +458,27 @@ def assess(rep: dict) -> dict:
                 "الكتلة أو إعادة كتابة الملف بأداة لا تحافظ على الإزاحات.",
                 "الوسوم المرفوضة: " + "، ".join(rej[:6]))
             break
+
+    cs = rep.get("compression_signature") or {}
+    if cs.get("ok"):
+        facts = {f["fact"] for f in cs.get("structural_inference", [])}
+        md = rep.get("metadata") or {}
+        has_cam = any(k in ("Make", "Model") for k in md)
+        if "ترميز تقدمي (Progressive)" in facts and has_cam:
+            add("عالية", 15, "⚠️ ترميز تقدمي في ملف يدّعي أنه خارج من كاميرا",
+                "الملف يحمل حقول صانع/طراز كاميرا بينما ترميزه تقدمي — الكاميرات "
+                "لا تُنتج JPEG تقدميًا عمليًا، فالملف أُعيد ترميزه ببرنامج.",
+                "SOF2 + حقول Make/Model")
+        if ("جداول هوفمان مُحسَّنة (غير قياسية)" in facts and has_cam):
+            add("متوسطة", 8, "⚠️ جداول هوفمان مُحسَّنة في ملف يدّعي أنه من كاميرا",
+                "مُرمِّزات الكاميرات تستخدم جداول هوفمان القياسية لسرعتها؛ وجود "
+                "جداول مُحسَّنة مع ميتاداتا كاميرا يدل على إعادة ترميز بعد الالتقاط.",
+                "بصمات DHT تخالف Annex K")
+        m = cs.get("database_match") or {}
+        if m.get("exact_matches"):
+            add("معلوماتية", 0, "🎯 تطابق بصمة الضغط مع مرجع مسجَّل",
+                f"بصمة الضغط الكاملة تطابق: {m.get('identified_source')}.",
+                f"توقيع: {(m.get('signature') or {}).get('full_signature', '')[:32]}")
 
     pr = ((rep.get("image_forensics") or {}).get("prnu") or {}).get("identification") or {}
     for r in pr.get("results", []):

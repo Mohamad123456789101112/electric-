@@ -54,6 +54,7 @@ $("#btnChain").onclick = async () => {
 };
 
 $("#btnCameras").onclick = () => openCameras();
+$("#btnSigs").onclick = () => openSigs();
 
 /* ----------------------------------------------------------------- الرفع */
 const dz = $("#dropzone");
@@ -128,7 +129,7 @@ function render() {
   $("#btnJson").href = `/api/evidence/${EID}`;
   $("#btnPkg").href = `/api/evidence/${EID}/package`;
 
-  tabSummary(); tabHashes(); tabMeta(); tabRecovery(); tabImage(); tabPrnu(); tabSteg();
+  tabSummary(); tabHashes(); tabMeta(); tabRecovery(); tabImage(); tabPrnu(); tabQt(); tabSteg();
   tabStruct(); tabCarve(); tabStrings(); tabTimeline(); tabEntropy(); tabHex(); tabRaw();
   $$("#tabs button")[0].click();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -304,6 +305,120 @@ function tabPrnu() {
       <li>الضغط الشديد جدًا والتصفية الرقمية يُضعفان الإشارة ويخفضان PCE.</li>
     </ul>`);
   el.innerHTML = h;
+}
+
+/* 4-ج) بصمة الضغط وجداول التكميم */
+function tabQt() {
+  const el = $("#tab-qt");
+  if (!el) return;
+  const c = REPORT.compression_signature;
+  if (!c || !c.ok) {
+    el.innerHTML = card("بصمة الضغط", `<p class="muted">${esc((c && c.reason) || "لا ينطبق (ليس ملف JPEG).")}</p>`);
+    return;
+  }
+  const s = c.signature || {}, q = c.quantization || {};
+  let h = card("🧬 ما هذه البصمة؟",
+    `<p>جداول التكميم وهوفمان وترتيب المقاطع هي <b>توقيع المُرمِّز</b> الذي أنتج الملف.
+     تبقى هذه البصمة سليمة <b>حتى لو مُسحت كل الميتاداتا</b>، لأنها جزء من بنية الضغط
+     نفسها. هذا هو مبدأ عمل JPEGsnoop.</p>
+     <p><b>${esc(c.verdict || "")}</b></p>`);
+
+  h += card("التوقيع المقيس", kvGrid({
+    "الجودة المقيسة": q.quality_estimate,
+    "كل الجداول قياسية (IJG)": q.all_tables_standard_ijg ? "نعم" : "لا — جدول مخصّص",
+    "تخفيض اللون": s.subsampling,
+    "نوع الإطار": s.progressive ? "تقدمي (Progressive)" : "أساسي (Baseline)",
+    "جداول هوفمان": s.huffman_standard ? "قياسية (Annex K)" : (s.huffman_optimized ? "مُحسَّنة" : "—"),
+    "ترتيب مقاطع APP": (s.app_marker_order || []).join(" > ") || "لا شيء",
+    "توقيع جداول التكميم": s.qt_signature,
+    "توقيع هوفمان": s.huffman_signature,
+    "التوقيع البنيوي": s.structure_signature,
+    "التوقيع الكامل": s.full_signature,
+  }));
+
+  (q.tables || []).forEach(t => {
+    const grid = `<table class="qt">${(t.grid_8x8 || []).map(r =>
+      `<tr>${r.map(v => `<td class="mono">${v}</td>`).join("")}</tr>`).join("")}</table>`;
+    h += card(`جدول ${t.table_id} — ${esc(t.role)} · الجودة ${esc(t.quality)}` +
+      (t.exact_ijg_match ? " ✅ مطابق تمامًا لمقياس IJG" : ` ⚠️ غير قياسي (انحراف ${esc(t.max_deviation)})`),
+      grid + `<p class="muted">${esc(t.note)}</p>` + kvGrid(t.stats || {}));
+  });
+
+  const inf = c.structural_inference || [];
+  if (inf.length) h += card("استدلالات بنيوية مقيسة",
+    `<ul>${inf.map(f => `<li><b>${esc(f.fact)}</b> — ${esc(f.detail)}
+      <code class="mono">${esc(f.evidence)}</code></li>`).join("")}</ul>`);
+
+  const m = c.database_match;
+  if (m) {
+    const mk = (arr, title) => arr && arr.length ? `<h4>${title}</h4>` + tbl(["المصدر", "التوثيق", "الجودة", "أُضيف"],
+      arr.map(e => `<tr><td><b>${esc(e.source)}</b><div class="muted">${esc(e.notes || "")}</div></td>
+        <td class="muted">${esc(e.provenance || "")}</td><td class="mono">${esc(e.quality)}</td>
+        <td class="mono">${esc(e.added_utc || "")}</td></tr>`).join("")) : "";
+    h += card(`المطابقة مع قاعدة البصمات (${m.database_size || 0} مُدخَلًا)`,
+      `<p><b>${esc(m.verdict || "")}</b></p>` +
+      mk(m.exact_matches, "تطابق تام للبصمة الكاملة") +
+      mk(m.quant_table_matches, "تطابق جداول التكميم فقط") +
+      (m.nearest && m.nearest.length ? `<h4>الأقرب (مسافة L1)</h4>` + tbl(["المصدر", "المسافة"],
+        m.nearest.map(e => `<tr><td>${esc(e.source)}</td><td class="mono">${esc(e.distance)}</td></tr>`).join("")) : "") +
+      `<p class="muted">لا تُنسب الصورة إلى جهة إلا بوجود عيّنة مرجعية موثّقة في القاعدة —
+       أضف عيّنة من جهاز بحوزتك من زر «🧬 قاعدة بصمات الضغط».</p>`);
+  }
+  el.innerHTML = h;
+}
+
+/* قاعدة بصمات الضغط */
+async function openSigs() {
+  showModal("🧬 قاعدة بصمات الضغط (JPEG)", `<div id="sigBody">جارٍ التحميل…</div>`);
+  await renderSigs();
+}
+
+async function renderSigs() {
+  let d = { count: 0, signatures: [] };
+  try { d = await (await fetch("/api/signatures")).json(); } catch (e) { }
+  const user = d.signatures.filter(s => (s.origin || "").includes("المحقق"));
+  const builtin = d.signatures.filter(s => !(s.origin || "").includes("المحقق"));
+  const row = s => `<tr><td><b>${esc(s.source)}</b><div class="muted">${esc(s.provenance || "")}</div></td>
+      <td class="mono">${esc(s.quality)}</td><td class="mono">${esc(s.subsampling || "")}</td>
+      <td class="mono" style="font-size:11px">${esc((s.full_signature || "").slice(0, 12))}…</td>
+      <td>${(s.origin || "").includes("المحقق") ? `<button class="btn ghost" data-sdel="${esc(s.full_signature)}">حذف</button>` : "—"}</td></tr>`;
+  $("#sigBody").innerHTML = `
+    <p class="muted">القاعدة تضم ${d.count} توقيعًا: ${builtin.length} مُولَّدة محليًا بمُرمِّز libjpeg
+      (قابلة لإعادة التوليد بـ<code>tools/build_signature_db.py</code>) و${user.length} أضافها المحقق.
+      <b>لا يُسجَّل هنا أي توقيع منسوب لجهة بلا عيّنة مرجعية موثّقة.</b></p>
+    <h4>توقيعات المحقق</h4>
+    ${user.length ? tbl(["المصدر / التوثيق", "الجودة", "تخفيض اللون", "التوقيع", ""], user.map(row).join(""))
+      : "<p class='muted'>لا توجد بعد.</p>"}
+    <hr><h4>تعلّم بصمة من عيّنة مرجعية</h4>
+    <div class="dz-meta">
+      <input id="sigName" placeholder="اسم المصدر (مثال: واتساب أندرويد 2.24 — صورة مُرسَلة)">
+      <input id="sigProv" placeholder="توثيق العيّنة (إلزامي: الجهاز/الإصدار/كيف حصلت عليها)">
+      <input id="sigNotes" placeholder="ملاحظات">
+    </div>
+    <p><input type="file" id="sigFile" accept="image/jpeg"></p>
+    <button class="btn primary" id="sigAdd">استخراج البصمة وتسجيلها</button>
+    <div id="sigMsg" class="muted"></div>
+    <hr><details><summary>عرض التوقيعات المُرفقة (${builtin.length})</summary>
+      ${tbl(["المصدر", "الجودة", "تخفيض اللون", "التوقيع", ""], builtin.map(row).join(""))}</details>`;
+  $("#sigBody").querySelectorAll("[data-sdel]").forEach(b => b.onclick = async () => {
+    await fetch("/api/signatures/" + b.dataset.sdel, { method: "DELETE" });
+    renderSigs();
+  });
+  $("#sigAdd").onclick = async () => {
+    const f = $("#sigFile").files[0], msg = $("#sigMsg");
+    const name = $("#sigName").value.trim(), prov = $("#sigProv").value.trim();
+    if (!name || !prov) { msg.textContent = "اسم المصدر وتوثيق العيّنة إلزاميان."; return; }
+    if (!f) { msg.textContent = "اختر صورة JPEG مرجعية."; return; }
+    const fd = new FormData();
+    fd.append("source", name); fd.append("provenance", prov);
+    fd.append("notes", $("#sigNotes").value); fd.append("file", f);
+    msg.textContent = "جارٍ استخراج البصمة…";
+    const r = await fetch("/api/signatures/learn", { method: "POST", body: fd });
+    const j = await r.json();
+    msg.textContent = r.ok ? `✅ سُجّلت بصمة «${j.source}» (جودة ${j.quality}).`
+      : "خطأ: " + (j.detail || "تعذّر التسجيل");
+    if (r.ok) renderSigs();
+  };
 }
 
 /* سجل الكاميرات */

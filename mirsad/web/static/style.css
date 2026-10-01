@@ -119,3 +119,7 @@ pre.json{background:#080c12;border:1px solid var(--line);border-radius:10px;padd
   max-height:600px;font-size:12px;direction:ltr;text-align:left}
 .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;background:#1b2635;color:var(--muted);margin-inline-start:6px}
 .map-link{display:inline-block;margin-top:6px}
+
+/* شبكة جدول التكميم 8×8 */
+table.qt{width:auto;border-collapse:collapse;margin:8px 0}
+table.qt td{border:1px solid var(--line,#21262d);padding:4px 8px;text-align:center;font-size:12px}

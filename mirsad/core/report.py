@@ -78,6 +78,42 @@ def html_report(rep: dict, case: dict | None = None, evidence: dict | None = Non
     if not rec_html:
         rec_html = "<p class='muted'>لم يُعثر على آثار وصفية مستعادة.</p>"
 
+    # ---- بصمة الضغط
+    cs = rep.get("compression_signature") or {}
+    if not cs.get("ok"):
+        qt_html = f"<p class='muted'>{_esc(cs.get('reason') or 'لا ينطبق (ليس JPEG).')}</p>"
+    else:
+        sg = cs.get("signature") or {}
+        qn = cs.get("quantization") or {}
+        qt_html = f"<p><b>{_esc(cs.get('verdict'))}</b></p>"
+        qt_html += _kv_table({
+            "توقيع جداول التكميم": sg.get("qt_signature"),
+            "توقيع جداول هوفمان": sg.get("huffman_signature"),
+            "التوقيع البنيوي": sg.get("structure_signature"),
+            "التوقيع الكامل": sg.get("full_signature"),
+            "تخفيض اللون": sg.get("subsampling"),
+            "نوع الإطار": "تقدمي" if sg.get("progressive") else "أساسي (Baseline)",
+            "ترتيب مقاطع APP": " > ".join(sg.get("app_marker_order") or []) or "لا شيء",
+            "جداول هوفمان": ("قياسية (Annex K)" if sg.get("huffman_standard")
+                              else "مُحسَّنة (غير قياسية)" if sg.get("huffman_optimized") else "—"),
+            "الجودة المقيسة": qn.get("quality_estimate"),
+            "كل الجداول قياسية IJG": "نعم" if qn.get("all_tables_standard_ijg") else "لا",
+        })
+        for t in qn.get("tables", []):
+            rows = "".join("<tr>" + "".join(f"<td class='mono'>{v}</td>" for v in row) + "</tr>"
+                           for row in t.get("grid_8x8", []))
+            qt_html += (f"<h4>جدول {_esc(t.get('table_id'))} — {_esc(t.get('role'))} · "
+                        f"الجودة {_esc(t.get('quality'))}"
+                        + (" (مطابقة تامة لمقياس IJG)" if t.get("exact_ijg_match")
+                           else f" (غير قياسي، انحراف {_esc(t.get('max_deviation'))})") + "</h4>"
+                        + f"<table>{rows}</table>"
+                        + f"<p class='muted'>{_esc(t.get('note'))}</p>")
+        inf = cs.get("structural_inference") or []
+        if inf:
+            qt_html += "<h4>استدلالات بنيوية مقيسة</h4><ul>" + "".join(
+                f"<li><b>{_esc(f['fact'])}</b> — {_esc(f['detail'])} "
+                f"<code>{_esc(f['evidence'])}</code></li>" for f in inf) + "</ul>"
+
     # ---- بصمة الجهاز من MakerNote
     mnr = rep.get("makernote") or {}
     mn_html = ""
@@ -250,34 +286,37 @@ footer{{margin-top:40px;border-top:1px solid #21262d;padding-top:14px;font-size:
 <h2>5. البيانات الوصفية المستخرجة</h2>
 {_kv_table(rep.get('metadata', {}))}
 
-<h2>6. بصمة الجهاز من MakerNote (الوسوم الخاصة بالمصنّع)</h2>
+<h2>6. بصمة الضغط وجداول التكميم (تحديد المُرمِّز بلا ميتاداتا)</h2>
+{qt_html}
+
+<h2>7. بصمة الجهاز من MakerNote (الوسوم الخاصة بالمصنّع)</h2>
 {mn_html}
 
-<h2>7. استرجاع البيانات الوصفية الممسوحة</h2>
+<h2>8. استرجاع البيانات الوصفية الممسوحة</h2>
 {rec_html}
 
-<h2>8. الخط الزمني</h2>
+<h2>9. الخط الزمني</h2>
 {"<ul>" + conflicts + "</ul>" if conflicts else ""}
 <table><thead><tr><th>التاريخ/الوقت</th><th>الحدث</th><th>المصدر</th></tr></thead><tbody>{tl_rows}</tbody></table>
 
-<h2>9. التحليل الإحصائي والعشوائية</h2>
+<h2>10. التحليل الإحصائي والعشوائية</h2>
 {_kv_table({k: v for k, v in (rep.get('entropy') or {}).items() if k not in ('map', 'anomalies')})}
 
-<h2>10. تحليل الصورة الجنائي</h2>
+<h2>11. تحليل الصورة الجنائي</h2>
 <div class="gallery">{gallery or "<p class='muted'>لا توجد مخرجات بصرية.</p>"}</div>
 {_kv_table({k: _short(v, 300) for k, v in (imgf.get('basic') or {}).items()})}
 
-<h2>11. بصمة ضجيج المستشعر PRNU (ربط الصورة بكاميرا فيزيائية)</h2>
+<h2>12. بصمة ضجيج المستشعر PRNU (ربط الصورة بكاميرا فيزيائية)</h2>
 {prnu_html}
 
-<h2>12. الملفات المنحوتة والمدمجة</h2>
+<h2>13. الملفات المنحوتة والمدمجة</h2>
 <table><thead><tr><th>النوع</th><th>الوصف</th><th>الإزاحة</th><th>الحجم</th><th>SHA-256</th></tr></thead>
 <tbody>{carved_rows or "<tr><td colspan='5' class='muted'>لا شيء</td></tr>"}</tbody></table>
 
-<h2>13. المؤشرات النصية المستخرجة (IOC)</h2>
+<h2>14. المؤشرات النصية المستخرجة (IOC)</h2>
 {ioc_html}
 
-<h2>14. سلسلة الحيازة</h2>
+<h2>15. سلسلة الحيازة</h2>
 <table><thead><tr><th>#</th><th>الوقت (UTC)</th><th>الفاعل</th><th>الإجراء</th><th>التفاصيل</th><th>بصمة القيد</th></tr></thead>
 <tbody>{custody_rows or "<tr><td colspan='6' class='muted'>لا توجد قيود</td></tr>"}</tbody></table>
 
