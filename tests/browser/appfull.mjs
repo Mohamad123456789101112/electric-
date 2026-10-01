@@ -50,8 +50,10 @@ try {
   console.log('   كود مولد؟', codeText.includes('while True') || codeText.includes('dwrite') ? '✅ نعم' : '❌ لأ — ' + codeText.slice(0,80));
   const nEx = document.getElementById('examplesGrid').children.length;
   console.log('   أمثلة في القايمة:', nEx);
-  const nComp = document.getElementById('simBoard').children.length;
-  console.log('   مكونات المحاكي:', nComp, nComp ? `(${document.querySelector('.comp-card') ? 'كروت شغالة' : 'فاضي!'})` : '');
+  const nWire = document.querySelectorAll('.wire-card').length;
+  console.log('   كروت دليل التوصيل:', nWire, nWire === 6 ? '(كاملة ✅)' : '(ناقصة!)');
+  const nSvg = document.querySelectorAll('.wire-svg').length;
+  console.log('   مخططات التوصيل SVG:', nSvg);
   // جرّب زر الأمثلة يفتح المودال
   document.getElementById('btnExamples').click();
   const opened = document.getElementById('examplesModal').classList.contains('open');
@@ -59,8 +61,10 @@ try {
   // جرّب تبويب المحاكي والكود
   document.getElementById('nav-code').click();
   console.log('   تبويب الكود بيفتح؟', document.getElementById('tab-code').classList.contains('active') ? '✅' : '❌');
-  document.getElementById('nav-sim').click();
-  console.log('   تبويب المحاكي بيفتح؟', document.getElementById('tab-sim').classList.contains('active') ? '✅' : '❌');
+  document.getElementById('nav-wiring').click();
+  console.log('   تبويب التوصيل بيفتح؟', document.getElementById('tab-wiring').classList.contains('active') ? '✅' : '❌');
+  const ctaVisible = document.getElementById('monCta').style.display !== 'none';
+  console.log('   شاشة «لسه متوصلش» ظاهرة؟', ctaVisible ? '✅' : '❌');
 } catch (e) {
   console.log('❌ استثناء:', e.message);
   console.log(e.stack.split('\n').slice(0, 5).join('\n'));

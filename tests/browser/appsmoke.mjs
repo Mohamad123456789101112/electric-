@@ -29,12 +29,11 @@ const arCode = readFileSync('../../libs/blockly/msg/ar.js', 'utf-8');
 new Function('window', arCode)(dom.window);
 
 // كل عناصر الواجهة موجودة؟
-const ids = ['blocklyDiv','codeArea','codeHl','simBoard','simAddBar','simRun','simStop','simMonitor',
-  'deviceMonitor','connPill','btnUpload','btnExamples','btnHelp','btnNew','btnCopyCode','btnDownloadCode',
+const ids = ['blocklyDiv','codeArea','codeHl','deviceMonitor','connPill','btnUpload','btnExamples','btnHelp','btnNew','btnCopyCode','btnDownloadCode',
   'wizardModal','wz-choose','wz-checking','wz-flash','wz-flashing','wz-uploading','wz-connected','wzBtnConnect',
   'wzBtnFlash','wzBtnUploadNow','chipSelect','flashLog','flashBar','examplesModal','examplesGrid','helpModal','toasts',
-  'tab-blocks','tab-code','tab-sim','tab-monitor','nav-blocks','nav-code','nav-sim','nav-monitor','warnings',
-  'devStop','devRerun','devClearMain','devClearMon','devDisconnect','fileInput','btnSaveFile','btnOpenFile','wzUnsupported','wzBody','wzBtnClose','wzBtnReinstall','simClearMon'];
+  'tab-blocks','tab-code','tab-wiring','tab-monitor','nav-blocks','nav-code','nav-wiring','nav-monitor','warnings',
+  'devStop','devRerun','devClearMain','devClearMon','devDisconnect','fileInput','btnSaveFile','btnOpenFile','wzUnsupported','wzBody','wzBtnClose','wzBtnReinstall','monCta','ctaConnect','devToolbar'];
 const missing = ids.filter(id => !document.getElementById(id));
 if (missing.length) { console.log('❌ عناصر ناقصة في HTML:', missing.join(', ')); process.exit(1); }
 console.log('✅ كل عناصر HTML موجودة (' + ids.length + ' عنصر)');

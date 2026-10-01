@@ -231,201 +231,118 @@ html, body {
 .code-note { padding: 0 16px 14px; color: var(--muted); font-size: 12.5px; line-height: 1.8; }
 .code-note code { background: var(--panel2); padding: 2px 6px; border-radius: 6px; direction: ltr; display: inline-block; }
 
-/* ================= المحاكي ================= */
-.sim-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+/* ================= دليل التوصيل ================= */
+.wire-head {
+  padding: 14px 16px 4px;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  flex-wrap: nowrap;
 }
-.sim-addbar { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; }
-.chip-btn {
-  background: var(--panel2);
-  border: 1px solid color-mix(in srgb, var(--c, #888) 45%, var(--border));
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 12.5px;
-  font-weight: 700;
-  padding: 8px 12px;
-  border-radius: 99px;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.chip-btn:active { transform: scale(.94); }
-.chip-btn.chip-danger { border-color: rgba(239,68,68,.4); color: #fca5a5; }
-.sim-runwrap { flex-shrink: 0; display: flex; gap: 8px; }
-.run-btn {
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  border: none; color: #04140a;
-  font-family: var(--font); font-weight: 900; font-size: 14px;
-  padding: 9px 18px; border-radius: 11px; cursor: pointer;
-  box-shadow: 0 4px 12px rgba(34,197,94,.3);
-}
-.stop-btn {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  border: none; color: #fff;
-  font-family: var(--font); font-weight: 900; font-size: 14px;
-  padding: 9px 18px; border-radius: 11px; cursor: pointer;
-  box-shadow: 0 4px 12px rgba(239,68,68,.3);
-}
-.hidden { display: none !important; }
+.wire-title { font-weight: 900; font-size: 17px; color: var(--accent); }
+.wire-sub { color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.7; }
 
-.sim-board {
+.wire-warn {
+  margin: 12px 16px 0;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fcd34d;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.wire-grid {
   flex: 1;
   overflow-y: auto;
-  padding: 14px;
+  padding: 14px 16px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 14px;
   align-content: start;
 }
-.sim-empty {
-  grid-column: 1 / -1;
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--muted);
-  line-height: 2;
-}
-.sim-empty-icon { font-size: 48px; margin-bottom: 10px; }
 
-.comp-card {
+.wire-card {
   background: var(--panel);
-  border: 1px solid color-mix(in srgb, var(--c, #888) 35%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--c, #888) 40%, var(--border));
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
-.comp-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.comp-title { font-weight: 800; font-size: 13px; color: color-mix(in srgb, var(--c) 75%, #fff); }
-.pin-select {
+.wire-card-title {
+  font-weight: 800;
+  font-size: 14.5px;
+  color: color-mix(in srgb, var(--c) 70%, #fff);
+}
+.wire-svg { width: 100%; height: auto; display: block; direction: ltr; }
+
+.wire-conn { display: flex; flex-direction: column; gap: 7px; padding-top: 4px; border-top: 1px dashed var(--border); }
+.wire-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.6; flex-wrap: wrap; }
+.pin-chip {
+  font-family: Consolas, monospace;
+  font-weight: 700;
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 7px;
+  direction: ltr;
+  flex-shrink: 0;
+}
+.pin-chip.sig { background: rgba(245, 158, 11, .15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, .4); }
+.pin-chip.sig2 { background: rgba(34, 197, 94, .12); color: #86efac; border: 1px solid rgba(34, 197, 94, .4); }
+.pin-chip.gnd { background: rgba(148, 163, 184, .12); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, .4); }
+.pin-chip.vcc { background: rgba(239, 68, 68, .12); color: #fca5a5; border: 1px solid rgba(239, 68, 68, .4); }
+.wire-note-small { font-size: 11.5px; color: var(--muted); line-height: 1.7; }
+
+.wire-foot {
+  padding: 4px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wire-foot-card {
   background: var(--panel2);
   border: 1px solid var(--border);
-  color: var(--accent2);
-  font-family: var(--font);
-  font-weight: 700;
-  font-size: 12px;
-  border-radius: 8px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
-.comp-del {
-  margin-inline-start: auto;
-  background: none;
-  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 12.5px;
   color: var(--muted);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 4px;
+  line-height: 1.9;
 }
-.comp-body { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 6px; }
+.wire-foot-card b { color: var(--text); }
 
-/* ليد */
-.led-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0; }
-.led {
-  width: 54px; height: 54px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--led) calc(var(--glow, 0) * 100%), #23262e), #191c23);
-  border: 3px solid color-mix(in srgb, var(--led) 30%, #333);
-  box-shadow: 0 0 calc(var(--glow, 0) * 34px) color-mix(in srgb, var(--led) 90%, transparent);
-  transition: box-shadow .15s, background .15s;
+/* حالة «غير متصل» في تبويب الشاشة */
+.mon-cta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 30px 22px;
+  text-align: center;
 }
-.led.on { border-color: var(--led); }
-.led-label { font-size: 12px; color: var(--muted); font-weight: 700; }
-
-/* زر */
-.sim-btn {
-  width: 84px; height: 84px;
-  border-radius: 50%;
-  border: 4px solid #2b3a55;
-  background: radial-gradient(circle at 35% 30%, #3b82f6, #1d4ed8);
-  color: #fff;
-  font-family: var(--font);
-  font-weight: 900;
-  font-size: 15px;
-  cursor: pointer;
-  box-shadow: 0 6px 0 #172554, 0 10px 20px rgba(0,0,0,.4);
-  transition: transform .05s, box-shadow .05s;
-  user-select: none;
-  touch-action: none;
+.mon-cta-icon { font-size: 56px; }
+.mon-cta-title { font-weight: 900; font-size: 18px; }
+.mon-cta-text { color: var(--muted); font-size: 13.5px; line-height: 2; max-width: 480px; margin: 0; }
+.mon-cta-steps {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 6px;
 }
-.sim-btn.pressed, .sim-btn:active {
-  transform: translateY(5px);
-  box-shadow: 0 1px 0 #172554, 0 4px 10px rgba(0,0,0,.4);
-  background: radial-gradient(circle at 35% 30%, #60a5fa, #2563eb);
-}
-
-/* مقاومة متغيرة */
-.pot-wrap { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 2px; }
-.pot-range { flex: 1; accent-color: #8b5cf6; height: 30px; }
-.pot-val { font-weight: 800; font-size: 13px; color: #c4b5fd; min-width: 44px; text-align: center; }
-
-/* سيرفو */
-.servo-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0; }
-.servo-dial {
-  width: 92px; height: 92px;
-  border-radius: 50%;
-  background: conic-gradient(from 180deg, #14532d, #052e16);
-  border: 3px solid #22c55e;
-  position: relative;
-  overflow: hidden;
-}
-.servo-needle {
-  position: absolute;
-  left: 50%; top: 50%;
-  width: 4px; height: 40px;
-  background: linear-gradient(#fff, #22d3ee);
-  border-radius: 4px;
-  transform-origin: 50% 100%;
-  transform: translateY(-100%) rotate(0deg);
-  transition: transform .18s ease-out;
-  margin-left: -2px;
-  box-shadow: 0 0 8px #22d3ee;
-}
-.servo-center {
-  position: absolute; left: 50%; top: 50%;
-  width: 16px; height: 16px;
-  margin: -8px 0 0 -8px;
-  background: #e2e8f0;
-  border-radius: 50%;
-}
-.servo-deg { font-weight: 900; color: #6ee7b7; font-size: 16px; }
-
-/* بازر */
-.buzzer-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 4px 0; }
-.buzzer-body { font-size: 40px; }
-.buzzer-waves { display: flex; gap: 4px; height: 18px; align-items: center; }
-.buzzer-waves span {
-  width: 5px; height: 6px; border-radius: 99px;
-  background: #ef4444; opacity: .25;
-}
-.buzzer-waves.active span { animation: wave .5s infinite ease-in-out; }
-.buzzer-waves.active span:nth-child(2) { animation-delay: .12s; }
-.buzzer-waves.active span:nth-child(3) { animation-delay: .24s; }
-@keyframes wave {
-  0%, 100% { height: 6px; opacity: .4; }
-  50% { height: 18px; opacity: 1; }
-}
-.buzzer-freq { font-size: 11px; }
-
-/* حساس مسافة */
-.sonic-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
-.sonic-eyes { display: flex; gap: 14px; }
-.sonic-eyes span {
-  width: 26px; height: 26px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 35%, #a5f3fc, #0891b2);
-  border: 3px solid #164e63;
-  box-shadow: 0 0 10px rgba(34,211,238,.5);
+.mon-cta-steps span {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 99px;
 }
 
 /* شاشات */
-.sim-mon-head, .dev-toolbar {
+.dev-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -643,5 +560,6 @@ html, body {
   .tab { font-size: 12.5px; }
   .code-box pre { font-size: 14px; }
   .monitor { height: 180px; }
-  .sim-board { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .wire-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .mon-cta-text { font-size: 14.5px; }
 }

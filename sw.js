@@ -1,5 +1,5 @@
 /* إلكترو بلوك — خدمة العمل للتشغيل بدون إنترنت */
-const CACHE = 'eb-cache-v1';
+const CACHE = 'eb-cache-v3';
 const CORE = [
   './',
   './index.html',
@@ -8,9 +8,6 @@ const CORE = [
   './js/blocks.js',
   './js/compiler.js',
   './js/pygen.js',
-  './js/interpreter.js',
-  './js/simulator.js',
-  './js/simui.js',
   './js/repl.js',
   './js/flasher.js',
   './js/examples.js',

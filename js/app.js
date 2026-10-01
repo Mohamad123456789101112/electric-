@@ -1,31 +1,25 @@
 /* ============================================================
    إلكترو بلوك — التطبيق الرئيسي (واجهة المستخدم)
+   كله حقيقي: بلوكات → كود MicroPython → الشريحة عبر Web Serial
    ============================================================ */
 import { registerBlocks, buildToolboxXml } from './blocks.js';
 import { compileProgram } from './compiler.js';
 import { generatePython } from './pygen.js';
-import { Interpreter } from './interpreter.js';
-import { SimBoard, COMPONENT_TYPES } from './simulator.js';
-import { SimUI } from './simui.js';
 import { SerialLink, MpRepl } from './repl.js';
 import { FIRMWARE, flashFirmware, pickFirmwareKey } from './flasher.js';
 import { EXAMPLES } from './examples.js';
 
 const $ = (id) => document.getElementById(id);
-const el = (sel, root) => (root || document).querySelector(sel);
 
 /* ================= حالة عامة ================= */
 let workspace = null;
-let simBoard = null;
-let simUI = null;
-let simInterpreter = null;
 let link = null;
 let repl = null;
 let connected = false;
 let compileTimer = null;
 
 /* ================= تابز ================= */
-const TABS = ['blocks', 'code', 'sim', 'monitor'];
+const TABS = ['blocks', 'code', 'wiring', 'monitor'];
 function showTab(name) {
   for (const t of TABS) {
     const panel = $('tab-' + t);
@@ -99,12 +93,9 @@ function scheduleCompile() {
   compileTimer = setTimeout(compileNow, 200);
 }
 
-let lastProgram = null;
-
 function compileNow() {
   const { program, warnings } = compileProgram(workspace.getTopBlocks(false));
   const py = generatePython(program);
-  lastProgram = program;
   $('codeArea').textContent = py;
   highlightCode();
   // التحذيرات
@@ -142,48 +133,6 @@ function highlightCode() {
   hl.innerHTML = html;
   hl.style.display = '';
   pre.style.display = 'none';
-}
-
-/* ================= المحاكي ================= */
-function initSim() {
-  simBoard = new SimBoard();
-  simBoard.attachMonitor($('simMonitor'));
-  simUI = new SimUI($('simBoard'), simBoard);
-  simUI.buildAddBar($('simAddBar'));
-
-  $('simRun').addEventListener('click', runSim);
-  $('simStop').addEventListener('click', stopSim);
-  $('simClearMon').addEventListener('click', () => {
-    $('simMonitor').innerHTML = '';
-  });
-}
-
-async function runSim() {
-  if (simInterpreter) return;
-  const { program, warnings } = compileNow();
-  if (warnings.length) toast('شوف التحذيرات اللي تحت البلوكات 👀', 'warn');
-  // تشغيل الصوت محتاج لمسة مستخدم — هنا عندنا ضغطة زر
-  simBoard.resetRuntime();
-  simBoard.hinted.clear();
-  simInterpreter = new Interpreter(simBoard);
-  $('simRun').disabled = true;
-  $('simStop').disabled = false;
-  $('simRun').classList.add('hidden');
-  $('simStop').classList.remove('hidden');
-  const r = await simInterpreter.run(program);
-  simInterpreter = null;
-  $('simRun').disabled = false;
-  $('simStop').disabled = true;
-  $('simRun').classList.remove('hidden');
-  $('simStop').classList.add('hidden');
-  if (r.status === 'error') {
-    toast('خطأ في التشغيل: ' + r.message, 'error', 6000);
-    simBoard.print('❌ خطأ: ' + r.message);
-  }
-}
-
-function stopSim() {
-  if (simInterpreter) simInterpreter.stop();
 }
 
 /* ================= الشاشة التسلسلية ================= */
@@ -238,7 +187,7 @@ async function wzConnect() {
       onStream: (t) => monAppend(t),
       onDisconnect: () => {
         setConnected(false);
-        toast('🔌 اتصل المنفذ بالشريحة انفصل', 'warn');
+        toast('🔌 اتصال الشريحة انفصل', 'warn');
       },
     });
     await link.pickPort();
@@ -332,7 +281,11 @@ function setConnected(v) {
   connected = v;
   $('connPill').classList.toggle('on', v);
   $('connPill').textContent = v ? '🟢 متصل' : '⚫ غير متصل';
-  $('nav-monitor').classList.toggle('disabled', !v);
+  $('nav-monitor').classList.toggle('disabled', false);
+  $('monCta').style.display = v ? 'none' : '';
+  $('devToolbar').style.display = v ? '' : 'none';
+  if (!v) $('deviceMonitor').style.opacity = '.3';
+  else $('deviceMonitor').style.opacity = '';
 }
 
 /* ================= مودالز ================= */
@@ -350,7 +303,6 @@ function scheduleSave() {
     try {
       const xml = Blockly.Xml.domToText(Blockly.Xml.workspaceToDom(workspace));
       localStorage.setItem('eb_workspace', xml);
-      localStorage.setItem('eb_components', JSON.stringify(simBoard.serialize()));
     } catch (e) {
       /* تجاهل */
     }
@@ -359,15 +311,6 @@ function scheduleSave() {
 
 function loadSaved() {
   const xml = localStorage.getItem('eb_workspace');
-  const comps = localStorage.getItem('eb_components');
-  if (comps) {
-    try {
-      simBoard.load(JSON.parse(comps));
-    } catch (e) {
-      /* تجاهل */
-    }
-  }
-  simUI.renderAll();
   if (xml) {
     try {
       workspace.clear();
@@ -382,18 +325,25 @@ function loadSaved() {
   loadExample(0, true);
 }
 
+/* ================= أدوات XML ================= */
+function xmlToDom(text) {
+  if (window.Blockly && Blockly.utils && Blockly.utils.xml && Blockly.utils.xml.textToDom) {
+    return Blockly.utils.xml.textToDom(text);
+  }
+  const doc = new DOMParser().parseFromString(text, 'text/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('ملف المشروع فيه خطأ');
+  return doc.documentElement;
+}
+
 function loadExample(i, silent) {
   const ex = EXAMPLES[i];
   if (!ex) return;
   workspace.clear();
   Blockly.serialization.workspaces.load(ex.blocks, workspace);
-  simBoard.clear();
-  for (const c of ex.components || []) simBoard.addComponent(c.type, c);
-  simUI.renderAll();
   compileNow();
   scheduleSave();
   if (!silent) {
-    toast('اتحمّل مثال: ' + ex.title + ' ✨', 'ok');
+    toast(`اتحمّل مثال: ${ex.title} ✨ — المكونات: ${ex.parts}`, 'ok', 5000);
     showTab('blocks');
   }
 }
@@ -401,10 +351,9 @@ function loadExample(i, silent) {
 function exportProject() {
   const data = {
     app: 'electro-block',
-    version: 1,
+    version: 2,
     name: 'مشروعي',
     workspace: Blockly.Xml.domToText(Blockly.Xml.workspaceToDom(workspace)),
-    components: simBoard.serialize(),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   downloadBlob(blob, 'مشروع-الكتروبلوك.json');
@@ -419,8 +368,6 @@ function importProject(file) {
       if (data.app !== 'electro-block') throw new Error('ملف غير صالح');
       workspace.clear();
       Blockly.Xml.domToWorkspace(xmlToDom(data.workspace), workspace);
-      simBoard.load(data.components);
-      simUI.renderAll();
       compileNow();
       scheduleSave();
       toast('اتحمّل المشروع 📂', 'ok');
@@ -448,7 +395,7 @@ function wireUi() {
   }
 
   $('btnUpload').addEventListener('click', openWizard);
-  $('btnUpload2')?.addEventListener('click', openWizard);
+  $('ctaConnect').addEventListener('click', openWizard);
 
   // ويزارد
   $('wzBtnConnect').addEventListener('click', wzConnect);
@@ -461,12 +408,13 @@ function wireUi() {
   $('devStop').addEventListener('click', async () => {
     if (repl) {
       await repl.interrupt();
-      toast('أرسلتنا إشارة إيقاف ⏹️', 'ok', 2000);
+      toast('أرسلنا إشارة إيقاف للشريحة ⏹️', 'ok', 2000);
     }
   });
   $('devRerun').addEventListener('click', async () => {
     if (repl) {
       await repl.resetAndRun();
+      toast('الشريحة بتعيد التشغيل 🔄', 'ok', 2000);
     }
   });
   $('devClearMain').addEventListener('click', async () => {
@@ -528,7 +476,7 @@ function wireUi() {
   EXAMPLES.forEach((ex, i) => {
     const card = document.createElement('button');
     card.className = 'ex-card';
-    card.innerHTML = `<div class="ex-emoji">${ex.emoji}</div><div class="ex-title">${ex.title}</div><div class="ex-desc">${ex.desc}</div>`;
+    card.innerHTML = `<div class="ex-emoji">${ex.emoji}</div><div class="ex-title">${ex.title}</div><div class="ex-desc">${ex.desc}</div><div class="ex-parts">🔧 ${ex.parts}</div>`;
     card.addEventListener('click', () => {
       closeModal('examplesModal');
       loadExample(i);
@@ -553,20 +501,9 @@ function wireUi() {
   }
 }
 
-/* ================= أدوات XML ================= */
-function xmlToDom(text) {
-  if (window.Blockly && Blockly.utils && Blockly.utils.xml && Blockly.utils.xml.textToDom) {
-    return Blockly.utils.xml.textToDom(text);
-  }
-  const doc = new DOMParser().parseFromString(text, 'text/xml');
-  if (doc.getElementsByTagName('parsererror').length) throw new Error('ملف المشروع فيه خطأ');
-  return doc.documentElement;
-}
-
 /* ================= البداية ================= */
 window.addEventListener('DOMContentLoaded', () => {
   initBlockly();
-  initSim();
   wireUi();
   loadSaved();
   setConnected(false);

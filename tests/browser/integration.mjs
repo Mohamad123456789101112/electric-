@@ -1,6 +1,7 @@
 /* الاختبار التكاملي الشامل: Blockly حقيقي + أمثلة الموقع + المترجم + مولد البايثون + فحص بايثون */
 import { JSDOM } from 'jsdom';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+mkdirSync('/tmp/py', { recursive: true });
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { pretendToBeVisual: true });
 global.window = dom.window;
