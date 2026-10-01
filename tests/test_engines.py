@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import tempfile
@@ -182,6 +183,59 @@ def main() -> int:
     rep3 = analyzer.analyze(read("wiped_but_recoverable.jpg"), "wiped_but_recoverable.jpg", TMP)
     check("رصد آثار ميتاداتا ممسوحة في التقييم",
           any("ممسوحة" in f["title"] for f in rep3["assessment"]["findings"]))
+
+    print("\n=== 13. فكّ MakerNote (بصمة الجهاز) ===")
+    from mirsad.core import makernote as mn_mod
+
+    can = mn_mod.analyze(read("makernote_canon.jpg"))
+    can0 = can["makernotes"][0]
+    check("كانون: التعرّف على المصنّع", can0["vendor"] == "Canon")
+    check("كانون: الرقم التسلسلي للجسم",
+          can0["identity"]["الرقم التسلسلي للكاميرا"]["value"] == "1230405678")
+    check("كانون: الرقم التسلسلي الداخلي",
+          can0["identity"]["الرقم التسلسلي الداخلي"]["value"] == "IS0123456789ABCD")
+    cs = can0["interpreted"]["إعدادات الكاميرا لحظة الالتقاط"]
+    check("كانون: فكّ مصفوفة CameraSettings (البؤرة)",
+          cs["MinFocalLength_mm"] == 24.0 and cs["MaxFocalLength_mm"] == 70.0, str(cs)[:120])
+    check("كانون: تحويل MaxAperture إلى f-stop", cs["MaxAperture_fstop"] == 2.8)
+
+    nik = mn_mod.analyze(read("makernote_nikon.jpg"))["makernotes"][0]
+    check("نيكون: ترويسة TIFF مستقلة (مرجع إزاحات داخلي)",
+          nik["offset_base"].startswith("ترويسة TIFF مستقلة"))
+    check("نيكون: عدّاد الغالق",
+          nik["identity"]["عدّاد الغالق (عدد الصور طوال عمر الجسم)"]["value"] == 48213)
+    check("نيكون: الرقم التسلسلي", nik["identity"]["الرقم التسلسلي للكاميرا"]["value"] == "6001234")
+    check("نيكون: قراءة بيانات العدسة من RATIONAL",
+          nik["identity"]["العدسة"]["value"].startswith("24-70mm"))
+
+    app = mn_mod.analyze(read("makernote_apple.jpg"))["makernotes"][0]
+    check("آبل: ترتيب بايتات Big Endian داخل كتلة Little Endian",
+          app["byte_order"] == "Big Endian")
+    rt = app["identity"]["زمن تشغيل الجهاز لحظة الالتقاط"]
+    check("آبل: فكّ bplist داخل وسم RunTime",
+          abs(rt["device_uptime_seconds"] - 123456.789) < 0.01, str(rt)[:120])
+    check("آبل: معرّف المحتوى (Live Photo)",
+          app["identity"]["معرّف المحتوى (يربط الصورة بفيديو Live Photo)"]["value"].startswith("9A8B"))
+    av = app["identity"]["اتجاه الجهاز لحظة الالتقاط (متجه التسارع)"]["value"]
+    check("آبل: متجه التسارع موقَّع (SRATIONAL)", av[1] < 0 and abs(av[1] + 0.9512) < 1e-6, str(av))
+
+    son = mn_mod.analyze(read("makernote_sony.jpg"))["makernotes"][0]
+    check("سوني: قراءة الوسوم بعد ترويسة SONY DSC", son["vendor"] == "Sony" and son["tag_count"] == 8)
+    check("سوني: الإقرار بالكتل المُعمّاة بدل تخمينها",
+          "_encrypted_note" in son["identity"])
+
+    check("لا MakerNote في صورة ممسوحة",
+          mn_mod.analyze(read("stripped_metadata.jpg"))["present"] is False)
+    check("MakerNote يمر عبر JSON بلا أخطاء",
+          isinstance(json.dumps(analyzer.jsonable(can), ensure_ascii=False), str))
+
+    repm = analyzer.analyze(read("makernote_nikon.jpg"), "makernote_nikon.jpg", TMP)
+    check("ربط MakerNote بالتقرير بلا أخطاء وحدات", not repm["errors"], str(repm["errors"])[:200])
+    check("حقول الجهاز تظهر في جدول الميتاداتا الموحّد",
+          any(k.startswith("🔧") for k in repm["metadata"]))
+    check("فكّ MakerNote لا يرفع مؤشر الشبهة لصورة سليمة",
+          repm["assessment"]["suspicion_score"] <= 20,
+          str(repm["assessment"]["suspicion_score"]))
 
     print("\n" + "=" * 60)
     print(f"النتيجة: {len(PASS)} ناجح / {len(FAIL)} فاشل")

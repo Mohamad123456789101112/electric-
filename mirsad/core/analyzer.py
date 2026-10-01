@@ -12,7 +12,8 @@ import traceback
 from datetime import datetime, timezone
 
 from . import (carver, containers, documents, entropy, exif as exif_mod, hashing,
-               imaging, jpeg as jpeg_mod, jpegdct, recovery, signatures, strings_, timeline)
+               imaging, jpeg as jpeg_mod, jpegdct, makernote as makernote_mod, recovery,
+               signatures, strings_, timeline)
 
 
 def _try(name: str, fn, errors: list):
@@ -93,6 +94,43 @@ def analyze(data: bytes, filename: str, artifacts_dir: str,
 
     # 6) الميتاداتا الموحّدة
     rep["metadata"] = _try("metadata", lambda: _unified_metadata(containers_out), errors) or {}
+
+    # 6-ب) فكّ MakerNote الخاص بالمصنّع (بصمة الجهاز داخل الميتاداتا)
+    mn = _try("makernote", lambda: makernote_mod.analyze(data), errors) or {}
+    rep["makernote"] = mn
+    # محدِّدات الجهاز الموجودة في EXIF القياسي نفسه (تبقى أحيانًا بعد إزالة MakerNote)
+    _std_src = ((containers_out.get("jpeg") or {}).get("app_payloads") or {}).get("Exif") \
+        or (containers_out.get("png") or {}).get("exif") or containers_out.get("tiff") \
+        or ((containers_out.get("iso_bmff") or {}).get("exif")) or {}
+    _std: dict = {}
+    if isinstance(_std_src, dict):
+        for sect in ("IFD0", "ExifIFD"):
+            for tag, label in (("BodySerialNumber", "الرقم التسلسلي للجسم (EXIF قياسي)"),
+                               ("CameraSerialNumber", "الرقم التسلسلي للكاميرا (EXIF قياسي)"),
+                               ("LensSerialNumber", "الرقم التسلسلي للعدسة (EXIF قياسي)"),
+                               ("LensModel", "طراز العدسة (EXIF قياسي)"),
+                               ("CameraOwnerName", "اسم مالك الكاميرا (EXIF قياسي)"),
+                               ("ImageUniqueID", "المعرّف الفريد للصورة (EXIF قياسي)")):
+                v = ((_std_src.get(sect) or {}).get(tag) or {}).get("raw")
+                if isinstance(v, str) and v.strip():
+                    _std[label] = v.strip()
+    if _std:
+        mn["standard_exif_identity"] = _std
+        for k, v in _std.items():
+            rep["metadata"][f"🔧 {k}"] = {"value": v, "source": "EXIF قياسي"}
+        if not mn.get("present"):
+            mn["verdict"] = (mn.get("verdict", "") +
+                             " لكن EXIF القياسي يحوي محدِّدات جهاز: " + "، ".join(_std)).strip()
+    for m in mn.get("makernotes", []):
+        if not m.get("decoded"):
+            continue
+        for label, val in (m.get("identity") or {}).items():
+            if label.startswith("_") or not isinstance(val, dict):
+                continue
+            v = val.get("value")
+            if isinstance(v, (str, int, float)):
+                rep["metadata"][f"🔧 {label}"] = {
+                    "value": v, "source": f"MakerNote ({m.get('vendor')})"}
 
     # 7) الاسترجاع (الميتاداتا الممسوحة)
     rec = _try("recovery", lambda: recovery.analyze(data, blob, jp), errors) or {}
@@ -382,6 +420,35 @@ def assess(rep: dict) -> dict:
         add("حرجة", 25, "فشل تحقق CRC داخل PNG",
             "إحدى كتل PNG لا تطابق مجموع تحققها — تعديل مباشر على بايتات الملف.",
             bad_crc[0])
+
+    # تضارب بصمة المصنّع: ترويسة MakerNote تكشف جهازًا غير المُعلن في EXIF
+    mnr = rep.get("makernote") or {}
+    ex_make = ""
+    _ex = (jp.get("app_payloads") or {}).get("Exif") or {}
+    if isinstance(_ex, dict):
+        ex_make = str(((_ex.get("IFD0") or {}).get("Make") or {}).get("raw") or "")
+    for m in mnr.get("makernotes", []):
+        v = (m.get("vendor") or "").lower()
+        if not m.get("decoded") or not v or not ex_make:
+            continue
+        mk = ex_make.lower()
+        alias = {"nikon": "nikon", "canon": "canon", "sony": "sony", "apple": "apple",
+                 "panasonic": "panasonic", "fujifilm": "fuji", "olympus": "olympus",
+                 "samsung": "samsung"}.get(v, v)
+        if alias not in mk:
+            add("عالية", 20, "⚠️ تضارب بين المصنّع المعلن وبنية MakerNote",
+                f"حقل Make في EXIF يقول «{ex_make}» بينما بنية MakerNote تخص {m.get('vendor_ar') or v}. "
+                "هذا يحدث عند تزوير حقول EXIF أو لصق ميتاداتا من صورة أخرى.",
+                f"ترويسة MakerNote: {m.get('header_ascii')} | {m.get('header_hex')}")
+        break
+    for m in mnr.get("makernotes", []):
+        rej = [k for k, f in (m.get("fields") or {}).items() if f.get("_rejected")]
+        if rej:
+            add("متوسطة", 8, "⚠️ مؤشرات تالفة داخل MakerNote",
+                "بعض مؤشرات الوسوم داخل MakerNote تشير خارج حدود البيانات — علامة على بتر "
+                "الكتلة أو إعادة كتابة الملف بأداة لا تحافظ على الإزاحات.",
+                "الوسوم المرفوضة: " + "، ".join(rej[:6]))
+            break
 
     rec = rep.get("recovery", {})
     has_main = bool((jp.get("app_payloads") or {}).get("Exif") or png.get("exif")

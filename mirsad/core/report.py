@@ -78,6 +78,41 @@ def html_report(rep: dict, case: dict | None = None, evidence: dict | None = Non
     if not rec_html:
         rec_html = "<p class='muted'>لم يُعثر على آثار وصفية مستعادة.</p>"
 
+    # ---- بصمة الجهاز من MakerNote
+    mnr = rep.get("makernote") or {}
+    mn_html = ""
+    if mnr.get("verdict"):
+        mn_html += f"<p><b>{_esc(mnr['verdict'])}</b></p>"
+    if mnr.get("standard_exif_identity"):
+        mn_html += ("<p><b>محدِّدات الجهاز من EXIF القياسي:</b></p>"
+                    + _kv_table(mnr["standard_exif_identity"]))
+    for m in mnr.get("makernotes", []):
+        head = (f"<h4>{_esc(m.get('vendor_ar') or m.get('vendor') or 'مصنّع غير معروف')}"
+                f" — {_esc(m.get('size'))} بايت · مرجع الإزاحات: {_esc(m.get('offset_base'))}"
+                f" · {_esc(m.get('byte_order'))}</h4>")
+        head += (f"<p class='muted mono' style='direction:ltr'>{_esc(m.get('header_ascii'))} | "
+                 f"{_esc(m.get('header_hex'))}</p>")
+        if not m.get("decoded"):
+            mn_html += head + f"<p class='muted'>{_esc(m.get('reason'))}</p>"
+            continue
+        ident = {k: (v.get("value") if isinstance(v, dict) else v)
+                 for k, v in (m.get("identity") or {}).items() if not k.startswith("_")}
+        notes = [v for k, v in (m.get("identity") or {}).items() if k.startswith("_")]
+        mn_html += head
+        if ident:
+            mn_html += "<p><b>محدِّدات هوية الجهاز:</b></p>" + _kv_table(
+                {k: _short(v, 300) for k, v in ident.items()})
+        for sec, vals in (m.get("interpreted") or {}).items():
+            mn_html += f"<p><b>{_esc(sec)}:</b></p>" + _kv_table(
+                {k: _short(v, 200) for k, v in vals.items()})
+        mn_html += "<p><b>كل وسوم MakerNote المقروءة:</b></p>" + _kv_table(
+            {f"{k} ({f.get('tag')})": _short(f.get("value"), 200)
+             for k, f in (m.get("fields") or {}).items()})
+        for n in notes:
+            mn_html += f"<p class='muted'>ℹ️ {_esc(n)}</p>"
+    if not mn_html:
+        mn_html = "<p class='muted'>لا يحتوي هذا الملف على وسوم MakerNote.</p>"
+
     imgf = rep.get("image_forensics", {})
     imgs = []
     for key, label in (("preview", "معاينة الدليل"),):
@@ -183,28 +218,31 @@ footer{{margin-top:40px;border-top:1px solid #21262d;padding-top:14px;font-size:
 <h2>5. البيانات الوصفية المستخرجة</h2>
 {_kv_table(rep.get('metadata', {}))}
 
-<h2>6. استرجاع البيانات الوصفية الممسوحة</h2>
+<h2>6. بصمة الجهاز من MakerNote (الوسوم الخاصة بالمصنّع)</h2>
+{mn_html}
+
+<h2>7. استرجاع البيانات الوصفية الممسوحة</h2>
 {rec_html}
 
-<h2>7. الخط الزمني</h2>
+<h2>8. الخط الزمني</h2>
 {"<ul>" + conflicts + "</ul>" if conflicts else ""}
 <table><thead><tr><th>التاريخ/الوقت</th><th>الحدث</th><th>المصدر</th></tr></thead><tbody>{tl_rows}</tbody></table>
 
-<h2>8. التحليل الإحصائي والعشوائية</h2>
+<h2>9. التحليل الإحصائي والعشوائية</h2>
 {_kv_table({k: v for k, v in (rep.get('entropy') or {}).items() if k not in ('map', 'anomalies')})}
 
-<h2>9. تحليل الصورة الجنائي</h2>
+<h2>10. تحليل الصورة الجنائي</h2>
 <div class="gallery">{gallery or "<p class='muted'>لا توجد مخرجات بصرية.</p>"}</div>
 {_kv_table({k: _short(v, 300) for k, v in (imgf.get('basic') or {}).items()})}
 
-<h2>10. الملفات المنحوتة والمدمجة</h2>
+<h2>11. الملفات المنحوتة والمدمجة</h2>
 <table><thead><tr><th>النوع</th><th>الوصف</th><th>الإزاحة</th><th>الحجم</th><th>SHA-256</th></tr></thead>
 <tbody>{carved_rows or "<tr><td colspan='5' class='muted'>لا شيء</td></tr>"}</tbody></table>
 
-<h2>11. المؤشرات النصية المستخرجة (IOC)</h2>
+<h2>12. المؤشرات النصية المستخرجة (IOC)</h2>
 {ioc_html}
 
-<h2>12. سلسلة الحيازة</h2>
+<h2>13. سلسلة الحيازة</h2>
 <table><thead><tr><th>#</th><th>الوقت (UTC)</th><th>الفاعل</th><th>الإجراء</th><th>التفاصيل</th><th>بصمة القيد</th></tr></thead>
 <tbody>{custody_rows or "<tr><td colspan='6' class='muted'>لا توجد قيود</td></tr>"}</tbody></table>
 

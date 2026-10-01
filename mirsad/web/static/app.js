@@ -210,9 +210,45 @@ function tabMeta() {
   if (iptc && Object.keys(iptc).length) extra += card("IPTC", kvGrid(iptc));
   const xmp = c.jpeg?.app_payloads?.XMP;
   if (xmp) extra += card("XMP الخام", `<pre class="json">${esc(xmp.slice(0, 20000))}</pre>`);
-  $("#tab-meta").innerHTML =
+  $("#tab-meta").innerHTML = makerNoteCards() +
     card("كل الحقول الوصفية المستخرجة", rows ? tbl(["الحقل", "القيمة", "المصدر"], rows)
       : "<p class='muted'>لا توجد بيانات وصفية قياسية — انتقل لتبويب «الاسترجاع».</p>") + extra;
+}
+
+/* 3-ب) بصمة الجهاز من MakerNote */
+function makerNoteCards() {
+  const mn = REPORT.makernote || {};
+  if (!mn.present && !(mn.standard_exif_identity && Object.keys(mn.standard_exif_identity).length))
+    return mn.verdict ? card("🔧 بصمة الجهاز (MakerNote)", `<p class="muted">${esc(mn.verdict)}</p>`) : "";
+  let h = "";
+  if (mn.standard_exif_identity && Object.keys(mn.standard_exif_identity).length)
+    h += card("🪪 محدِّدات الجهاز من EXIF القياسي", kvGrid(mn.standard_exif_identity));
+  (mn.makernotes || []).forEach(m => {
+    const title = `🔧 MakerNote · ${esc(m.vendor_ar || m.vendor || "غير معروف")}`;
+    let b = `<p>${esc(mn.verdict)}</p>
+      <div class="kv"><div><b>الحجم</b><span>${esc(m.size)} بايت</span></div>
+      <div><b>مرجع الإزاحات</b><span>${esc(m.offset_base || "—")}</span></div>
+      <div><b>ترتيب البايتات</b><span>${esc(m.byte_order || "—")}</span></div>
+      <div><b>عدد الوسوم</b><span>${esc(m.tag_count || 0)}</span></div></div>
+      <p class="mono muted" dir="ltr">${esc(m.header_ascii || "")} | ${esc(m.header_hex || "")}</p>`;
+    if (!m.decoded) { h += card(title, b + `<p class="muted">${esc(m.reason || "")}</p>`); return; }
+    const ident = Object.entries(m.identity || {}).filter(([k]) => !k.startsWith("_"));
+    if (ident.length) b += tbl(["محدِّد الهوية", "القيمة", "الوسم"], ident.map(([k, v]) =>
+      `<tr><td>${esc(k)}</td><td><b>${esc(fmt(v && v.value !== undefined ? v.value : v)).slice(0, 400)}</b></td>
+       <td class="mono muted">${esc((v && v.tag) || "")}</td></tr>`).join(""));
+    Object.entries(m.identity || {}).filter(([k]) => k.startsWith("_"))
+      .forEach(([, v]) => { b += `<p class="muted">ℹ️ ${esc(fmt(v))}</p>`; });
+    Object.entries(m.interpreted || {}).forEach(([sec, vals]) => {
+      b += `<h4>${esc(sec)}</h4>` + kvGrid(vals);
+    });
+    b += `<h4>كل الوسوم المقروءة</h4>` + tbl(["الوسم", "النوع", "القيمة"],
+      Object.entries(m.fields || {}).map(([k, f]) =>
+        `<tr><td>${esc(k)} <span class="pill mono">${esc(f.tag)}</span></td>
+         <td class="muted">${esc(f.type)}</td>
+         <td>${esc(fmt(f.value)).slice(0, 300)}${f._rejected ? ` <span class="badge high">${esc(f._rejected)}</span>` : ""}</td></tr>`).join(""));
+    h += card(title, b);
+  });
+  return h;
 }
 
 /* 4) الاسترجاع */

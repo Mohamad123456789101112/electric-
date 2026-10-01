@@ -32,48 +32,91 @@ def base_image(w=640, h=480, seed=7) -> Image.Image:
     return Image.fromarray(acc.astype(np.uint8), "RGB")
 
 
-ASCII, SHORT, LONG, RATIONAL, BYTE = 2, 3, 4, 5, 1
-TYPE_SIZE = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8}
+ASCII, SHORT, LONG, RATIONAL, BYTE, SRATIONAL = 2, 3, 4, 5, 1, 10
+TYPE_SIZE = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 10: 8}
 
 
-def _enc(typ, val) -> tuple[int, bytes]:
-    """ترميز قيمة وسم TIFF (Little Endian) وإرجاع (العدد، البايتات)."""
+UNDEFINED = 7
+
+
+def _enc(typ, val, e="<") -> tuple[int, bytes]:
+    """ترميز قيمة وسم TIFF وإرجاع (العدد، البايتات)."""
     if typ == ASCII:
         b = val.encode("utf-8") + b"\x00"
         return len(b), b
-    if typ == BYTE:
-        return len(val), bytes(val)
+    if typ in (BYTE, UNDEFINED):
+        b = bytes(val) if not isinstance(val, bytes) else val
+        return len(b), b
     if typ == SHORT:
         v = val if isinstance(val, (list, tuple)) else [val]
-        return len(v), b"".join(struct.pack("<H", x) for x in v)
+        return len(v), b"".join(struct.pack(e + "H", x) for x in v)
     if typ == LONG:
         v = val if isinstance(val, (list, tuple)) else [val]
-        return len(v), b"".join(struct.pack("<I", x) for x in v)
+        return len(v), b"".join(struct.pack(e + "I", x) for x in v)
     if typ == RATIONAL:
         v = val if isinstance(val[0], (list, tuple)) else [val]
-        return len(v), b"".join(struct.pack("<II", n, d) for n, d in v)
+        return len(v), b"".join(struct.pack(e + "II", n, d) for n, d in v)
+    if typ == SRATIONAL:
+        v = val if isinstance(val[0], (list, tuple)) else [val]
+        return len(v), b"".join(struct.pack(e + "ii", n, d) for n, d in v)
     raise ValueError(typ)
 
 
-def _ifd(entries: list[tuple[int, int, object]], base: int, next_ifd: int = 0,
-         pointer_fixups: dict | None = None) -> bytes:
-    """بناء IFD كامل عند الإزاحة base داخل بنية TIFF."""
-    entries = sorted(entries, key=lambda e: e[0])
+def _ifd(entries, base: int, next_ifd: int = 0, e: str = "<", ptr_origin: int = 0) -> bytes:
+    """بناء IFD عند الإزاحة المطلقة base؛ المؤشرات تُكتب منسوبة إلى ptr_origin."""
+    entries = sorted(entries, key=lambda x: x[0])
     n = len(entries)
     body_off = base + 2 + n * 12 + 4
-    out = struct.pack("<H", n)
+    out = struct.pack(e + "H", n)
     tail = b""
     for tag, typ, val in entries:
-        cnt, raw = _enc(typ, val)
+        cnt, raw = _enc(typ, val, e)
         size = len(raw)
         if size <= 4:
             field = raw + b"\x00" * (4 - size)
         else:
-            field = struct.pack("<I", body_off + len(tail))
+            field = struct.pack(e + "I", body_off + len(tail) - ptr_origin)
             tail += raw + (b"\x00" if len(raw) % 2 else b"")
-        out += struct.pack("<HHI", tag, typ, cnt) + field
-    out += struct.pack("<I", next_ifd)
+        out += struct.pack(e + "HHI", tag, typ, cnt) + field
+    out += struct.pack(e + "I", next_ifd)
     return out + tail
+
+
+# ------------------------------------------------ كاتب bplist00 (لوسم RunTime)
+
+def _bplist_dict(d: dict) -> bytes:
+    """قائمة خصائص ثنائية مبسّطة: قاموس مفاتيحه نصوص ASCII وقيمه أعداد صحيحة."""
+    objs = []
+    keys = list(d.keys())
+    top_refs = (list(range(1, 1 + len(keys))), list(range(1 + len(keys), 1 + 2 * len(keys))))
+    out = bytearray(b"bplist00")
+    offsets = []
+
+    def add(b: bytes):
+        offsets.append(len(out))
+        out.extend(b)
+
+    marker = bytes([0xD0 | len(keys)])
+    add(marker + bytes(top_refs[0]) + bytes(top_refs[1]))
+    for k in keys:
+        add(bytes([0x50 | len(k)]) + k.encode("ascii"))
+    for k in keys:
+        v = int(d[k])
+        if v < 0:
+            add(b"\x13" + struct.pack(">q", v))
+        elif v < 256:
+            add(b"\x10" + bytes([v]))
+        elif v < 65536:
+            add(b"\x11" + struct.pack(">H", v))
+        elif v < 2 ** 32:
+            add(b"\x12" + struct.pack(">I", v))
+        else:
+            add(b"\x13" + struct.pack(">Q", v))
+    table_off = len(out)
+    for o in offsets:
+        out.append(o)                      # حجم إزاحة = بايت واحد (ملف صغير)
+    out += b"\x00" * 6 + bytes([1, 1]) + struct.pack(">QQQ", len(offsets), 0, table_off)
+    return bytes(out)
 
 
 def build_exif() -> bytes:
@@ -128,6 +171,150 @@ def build_exif() -> bytes:
     ifd0 = _ifd(ifd0_entries_stub + [(0x8769, LONG, exif_off), (0x8825, LONG, gps_off)], 8)
     assert len(ifd0) == len(stub0)
     return b"Exif\x00\x00" + tiff_head + ifd0 + exif_blob + gps_blob
+
+
+
+# ===================================================================
+#   بناء كتل MakerNote ببنية مطابقة لمواصفات كل مصنّع (ترويسة + مرجع إزاحات)
+# ===================================================================
+
+def _mn_canon(off: int) -> bytes:
+    """كانون: IFD مباشر بلا ترويسة، المؤشرات منسوبة لبداية TIFF."""
+    settings = [0] * 50
+    settings[0] = 100            # طول المصفوفة بالبايت
+    settings[1] = 0              # MacroMode
+    settings[3] = 3              # Quality
+    settings[7] = 1              # FocusMode
+    settings[16] = 160           # CameraISO
+    settings[17] = 5             # MeteringMode
+    settings[20] = 3             # ExposureMode
+    settings[22] = 61182         # LensType
+    settings[23] = 70            # MaxFocalLength
+    settings[24] = 24            # MinFocalLength
+    settings[25] = 1             # FocalUnits
+    settings[26] = 95            # MaxAperture  (2^(95/64) ≈ f/2.8)
+    settings[34] = 1             # ImageStabilization
+    entries = [
+        (0x0001, SHORT, settings),
+        (0x0006, ASCII, "Canon EOS 5D Mark IV"),
+        (0x0007, ASCII, "Firmware Version 1.3.3"),
+        (0x0008, LONG, 1180632074),
+        (0x0009, ASCII, "Mohamed Investigator"),
+        (0x000C, LONG, 1230405678),
+        (0x0010, LONG, 0x80000349),
+        (0x0095, ASCII, "EF24-70mm f/2.8L II USM"),
+        (0x0096, ASCII, "IS0123456789ABCD"),
+    ]
+    return _ifd(entries, off, 0, "<", 0)
+
+
+def _mn_nikon(off: int) -> bytes:
+    """نيكون Type 3: ترويسة + TIFF مستقل عند الإزاحة 10 داخل الكتلة."""
+    header = b"Nikon\x00\x02\x10\x00\x00"
+    inner = off + 10
+    entries = [
+        (0x0001, UNDEFINED, b"0210"),
+        (0x0002, SHORT, [0, 400]),
+        (0x0004, ASCII, "FINE  "),
+        (0x0005, ASCII, "AUTO        "),
+        (0x0007, ASCII, "AF-S  "),
+        (0x0083, BYTE, [14]),
+        (0x0084, RATIONAL, [(240, 10), (700, 10), (28, 10), (28, 10)]),
+        (0x001D, ASCII, "6001234"),
+        (0x00A5, LONG, 48250),
+        (0x00A7, LONG, 48213),          # ← عدّاد الغالق الحقيقي
+        (0x0098, UNDEFINED, bytes((i * 37 + 11) & 0xFF for i in range(60))),
+    ]
+    body = _ifd(entries, inner + 8, 0, "<", inner)
+    return header + b"II*\x00" + struct.pack("<I", 8) + body
+
+
+def _mn_apple(off: int) -> bytes:
+    """آبل: ترويسة Apple iOS + IFD بترتيب Big Endian، المؤشرات منسوبة لبداية الكتلة."""
+    header = b"Apple iOS\x00" + b"\x00\x01" + b"MM"
+    runtime = _bplist_dict({"flags": 1, "value": 123456789012345,
+                            "timescale": 1000000000, "epoch": 0})
+    entries = [
+        (0x0001, LONG, 14),
+        (0x0003, UNDEFINED, runtime),
+        (0x0008, SRATIONAL, [(-32, 1000), (-9512, 10000), (-2993, 10000)]),
+        (0x000A, LONG, 3),
+        (0x000B, ASCII, "4F2C8E1A-9B3D-4C5E-8A7F-1D2E3B4C5A6D"),
+        (0x000C, SRATIONAL, [(340, 1000), (1200, 1000)]),
+        (0x0011, ASCII, "9A8B7C6D-5E4F-4321-ABCD-0123456789EF"),
+        (0x0014, LONG, 10),
+        (0x0015, ASCII, "B7F3A1C94E2D5068"),
+    ]
+    body = _ifd(entries, off + 14, 0, ">", off)
+    return header + body
+
+
+def _mn_sony(off: int) -> bytes:
+    """سوني: ترويسة SONY DSC، المؤشرات منسوبة لبداية TIFF، مع كتلة مُعمّاة."""
+    header = b"SONY DSC \x00\x00\x00"
+    entries = [
+        (0x0102, LONG, 2),
+        (0x2002, LONG, 0),
+        (0x9050, UNDEFINED, bytes((i * 91 + 7) & 0xFF for i in range(96))),
+        (0xB001, SHORT, 349),
+        (0xB027, LONG, 50),
+        (0xB041, LONG, 1),
+        (0xB047, SHORT, 3),
+        (0xB04A, LONG, 7),
+    ]
+    return header + _ifd(entries, off + 12, 0, "<", 0)
+
+
+_MN_BUILDERS = {"canon": _mn_canon, "nikon": _mn_nikon,
+                "apple": _mn_apple, "sony": _mn_sony}
+
+_VENDOR_META = {
+    "canon": ("Canon", "Canon EOS 5D Mark IV", "Firmware Version 1.3.3"),
+    "nikon": ("NIKON CORPORATION", "NIKON D850", "Ver.1.10"),
+    "apple": ("Apple", "iPhone 14 Pro", "16.5.1"),
+    "sony":  ("SONY", "ILCE-7RM4", "ILCE-7RM4 v1.20"),
+}
+
+
+def build_exif_with_makernote(vendor: str) -> bytes:
+    """بناء كتلة EXIF كاملة تحوي MakerNote حقيقي البنية (تمريرتان لضبط المؤشرات)."""
+    make, model, soft = _VENDOR_META[vendor]
+    marker = b"\xAB\xCD" + vendor.encode().ljust(6, b"\x00")
+    probe = _MN_BUILDERS[vendor](0)
+    mn_len = len(probe)
+
+    def assemble(mn_bytes: bytes) -> bytes:
+        exif_entries = [
+            (0x9000, UNDEFINED, b"0231"),
+            (0x9003, ASCII, "2024:07:19 18:42:05"),
+            (0x9004, ASCII, "2024:07:19 18:42:05"),
+            (0x829A, RATIONAL, (1, 400)),
+            (0x829D, RATIONAL, (28, 10)),
+            (0x8827, SHORT, 400),
+            (0x920A, RATIONAL, (50, 1)),
+            (0xA002, LONG, 640),
+            (0xA003, LONG, 480),
+            (0x927C, UNDEFINED, mn_bytes),
+        ]
+        ifd0_stub = [
+            (0x010F, ASCII, make), (0x0110, ASCII, model), (0x0131, ASCII, soft),
+            (0x0132, ASCII, "2024:07:19 18:42:05"), (0x0112, SHORT, 1),
+        ]
+        stub0 = _ifd(ifd0_stub + [(0x8769, LONG, 0)], 8)
+        exif_off = 8 + len(stub0)
+        exif_blob = _ifd(exif_entries, exif_off, 0, "<", 0)
+        ifd0 = _ifd(ifd0_stub + [(0x8769, LONG, exif_off)], 8)
+        return b"Exif\x00\x00" + b"II*\x00" + struct.pack("<I", 8) + ifd0 + exif_blob
+
+    # التمريرة الأولى: علامة فريدة لتحديد الموضع النهائي لكتلة MakerNote
+    placeholder = marker + b"\x00" * (mn_len - len(marker))
+    first = assemble(placeholder)
+    pos = first.find(placeholder)
+    assert pos > 0, "تعذّر تحديد موضع MakerNote"
+    mn_abs = pos - 6          # الإزاحة داخل TIFF (بعد "Exif\0\0")
+    real = _MN_BUILDERS[vendor](mn_abs)
+    assert len(real) == mn_len
+    return assemble(real)
 
 
 def main() -> list[str]:
@@ -225,6 +412,13 @@ def main() -> list[str]:
     p10 = os.path.join(OUT, "document_with_js.pdf")
     open(p10, "wb").write(pdf)
     made.append(p10)
+
+    # 11) صور بأربع بنى MakerNote حقيقية (كانون · نيكون · آبل · سوني)
+    for vendor in ("canon", "nikon", "apple", "sony"):
+        px = base_image(640, 480, seed=hash(vendor) % 1000)
+        pv = os.path.join(OUT, f"makernote_{vendor}.jpg")
+        px.save(pv, "JPEG", quality=94, exif=build_exif_with_makernote(vendor))
+        made.append(pv)
 
     return made
 
