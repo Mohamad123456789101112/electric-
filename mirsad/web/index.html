@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مِرصاد — منظومة التحقيق الجنائي الرقمي</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">⚖️</span>
+    <div>
+      <h1>مِرصاد</h1>
+      <small>منظومة التحقيق الجنائي الرقمي — تحليل حقيقي للبايتات، بلا محاكاة</small>
+    </div>
+  </div>
+  <div class="topactions">
+    <select id="caseSelect" title="القضية الحالية"><option value="">— بدون قضية —</option></select>
+    <button class="btn ghost" id="btnNewCase">+ قضية جديدة</button>
+    <button class="btn ghost" id="btnChain">🔗 سلسلة الحيازة</button>
+    <button class="btn ghost" id="btnCameras">📷 سجل الكاميرات (PRNU)</button>
+    <button class="btn ghost" id="btnSigs">🧬 قاعدة بصمات الضغط</button>
+    <button class="btn ghost" id="btnCaseMap">🗺️ خريطة القضية</button>
+  </div>
+</header>
+
+<main>
+  <section id="dropzone" class="dropzone">
+    <div class="dz-inner">
+      <div class="dz-icon">🔬</div>
+      <h2>أفلِت الدليل الرقمي هنا</h2>
+      <p>صورة · فيديو · صوت · PDF · مستند أوفيس · أرشيف · ملف تنفيذي · أي ملف ثنائي</p>
+      <div class="dz-btns">
+        <label class="btn primary">اختيار ملف<input type="file" id="fileInput" hidden></label>
+        <label class="chk"><input type="checkbox" id="deepChk" checked> تحليل عميق (ELA، ضجيج، إخفاء، نسخ-لصق)</label>
+      </div>
+      <div class="dz-meta">
+        <input id="actorInput" placeholder="اسم المحقق" value="محقق">
+        <input id="noteInput" placeholder="مصدر الدليل / ملاحظة الحيازة">
+      </div>
+    </div>
+  </section>
+
+  <section id="progress" class="progress hidden">
+    <div class="spinner"></div>
+    <div><strong id="progTitle">جارٍ التحليل…</strong><div id="progStep" class="muted"></div></div>
+  </section>
+
+  <section id="results" class="hidden">
+    <div class="verdict" id="verdict"></div>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="summary" class="active">الخلاصة</button>
+      <button data-tab="hashes">البصمات</button>
+      <button data-tab="meta">الميتاداتا</button>
+      <button data-tab="geo">📍 الموقع</button>
+      <button data-tab="recovery">الاسترجاع 🔥</button>
+      <button data-tab="image">تحليل الصورة</button>
+      <button data-tab="prnu">بصمة المستشعر 🎯</button>
+      <button data-tab="qt">بصمة الضغط 🧬</button>
+      <button data-tab="steg">الإخفاء</button>
+      <button data-tab="struct">البنية</button>
+      <button data-tab="carve">النحت</button>
+      <button data-tab="strings">النصوص و IOC</button>
+      <button data-tab="timeline">الخط الزمني</button>
+      <button data-tab="entropy">العشوائية</button>
+      <button data-tab="hex">الهيكس</button>
+      <button data-tab="raw">JSON الخام</button>
+    </nav>
+
+    <div class="panels">
+      <div class="panel active" id="tab-summary"></div>
+      <div class="panel" id="tab-hashes"></div>
+      <div class="panel" id="tab-meta"></div>
+      <div class="panel" id="tab-geo"></div>
+      <div class="panel" id="tab-recovery"></div>
+      <div class="panel" id="tab-image"></div>
+      <div class="panel" id="tab-prnu"></div>
+      <div class="panel" id="tab-qt"></div>
+      <div class="panel" id="tab-steg"></div>
+      <div class="panel" id="tab-struct"></div>
+      <div class="panel" id="tab-carve"></div>
+      <div class="panel" id="tab-strings"></div>
+      <div class="panel" id="tab-timeline"></div>
+      <div class="panel" id="tab-entropy"></div>
+      <div class="panel" id="tab-hex"></div>
+      <div class="panel" id="tab-raw"></div>
+    </div>
+
+    <div class="exportbar">
+      <a class="btn" id="btnHtml" target="_blank">📄 تقرير HTML</a>
+      <a class="btn" id="btnTxt" target="_blank">📝 ملخص نصي</a>
+      <a class="btn" id="btnPkg">📦 حزمة أدلة ZIP</a>
+      <a class="btn" id="btnJson" target="_blank">{ } JSON</a>
+      <button class="btn ghost" id="btnVerify">✔ تحقق من سلامة الدليل</button>
+      <button class="btn ghost" id="btnNew">⟲ دليل جديد</button>
+    </div>
+  </section>
+</main>
+
+<div class="modal hidden" id="modal">
+  <div class="modal-box">
+    <h3 id="modalTitle">نافذة</h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions"><button class="btn ghost" id="modalClose">إغلاق</button></div>
+  </div>
+</div>
+
+<footer class="foot">
+  مِرصاد · كل القياسات مأخوذة مباشرة من بايتات الدليل · واجهة REST متاحة على <code>/docs</code>
+</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
