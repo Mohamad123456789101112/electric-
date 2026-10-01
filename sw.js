@@ -21,9 +21,8 @@ const CORE = [
   './img/icon.svg',
   './img/icon-192.png',
   './img/icon-512.png',
-  './firmware/esp32/ESP32_GENERIC-20250911-v1.26.1.bin',
-  './firmware/esp32c3/ESP32_GENERIC_C3-20250911-v1.26.1.bin',
-  './firmware/esp32s3/ESP32_GENERIC_S3-20240602-v1.23.0.bin',
+  // ملفات الـ firmware (5MB) مش بتتحفظ هنا عشان الأولوية سرعة أول زيارة —
+  // بتتحفظ أوتوماتيك أول ما تحملها وقت التثبيت (شوف fetch handler تحت)
 ];
 
 self.addEventListener('install', (e) => {

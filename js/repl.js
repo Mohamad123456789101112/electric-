@@ -152,25 +152,22 @@ export class MpRepl {
   }
 
   /** هل MicroPython موجود وشغال؟ */
-  async probe(timeoutMs = 3500) {
+  async probe() {
     try {
-      await this.link.drain(150);
-      // أوقف أي برنامج شغال وبعدين شوف لو فيه برومبت
-      await this.link.write('\r\x03\x03');
-      try {
-        const pre = await this.link.waitUntil('>>>', timeoutMs);
-        return { ok: true, banner: pre };
-      } catch (e) {
-        /* ممكن البانر جه قبل ما نبدأ الاستنى */
+      // استنى شوية بعد الفتح — الشريحة ممكن تكون لسه بتعمل reboot
+      await this.link.drain(400);
+      // 3 محاولات: لو برنامج قديم شغال، Ctrl-C بيوقفة ويظهر البرومبت
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await this.link.write('\r\x03\x03');
+        try {
+          const pre = await this.link.waitUntil('>>>', attempt === 0 ? 2500 : 1500);
+          return { ok: true, banner: pre };
+        } catch (e) {
+          /* البورمبت لسه ماهدفش — هجرب تاني */
+        }
       }
       await this.link.drain(200);
-      await this.link.write('\r');
-      try {
-        const pre = await this.link.waitUntil('>>>', 1500);
-        return { ok: true, banner: pre };
-      } catch (e) {
-        return { ok: false };
-      }
+      return { ok: false };
     } catch (e) {
       return { ok: false, error: e.message };
     }

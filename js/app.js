@@ -285,11 +285,13 @@ async function wzFlash() {
       },
     });
     toast('🎉 اتثبّت MicroPython بنجاح!', 'ok', 5000);
-    // اتصال تاني وارفع البرنامج
+    // اتصال تاني بنفس المنفذ وارفع البرنامج
     link = new SerialLink({
       onStream: (t) => monAppend(t),
       onDisconnect: () => setConnected(false),
     });
+    link.port = port;
+    repl = null;
     await link.open(115200);
     const probe = await new MpRepl(link).probe(4000);
     if (probe.ok) {
