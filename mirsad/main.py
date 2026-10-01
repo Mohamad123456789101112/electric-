@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .core import analyzer, hashing, report as report_mod
+from .core import analyzer, hashing, prnu as prnu_mod, report as report_mod
 from .core.case import CaseStore
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +23,7 @@ DATA_ROOT = os.environ.get("MIRSAD_DATA", os.path.join(os.path.dirname(ROOT), "d
 MAX_UPLOAD = int(os.environ.get("MIRSAD_MAX_UPLOAD_MB", "512")) * 1024 * 1024
 
 store = CaseStore(DATA_ROOT)
+cameras = prnu_mod.CameraRegistry(os.path.join(DATA_ROOT, "prnu_cameras"))
 app = FastAPI(title="مِرصاد — منظومة التحقيق الجنائي الرقمي", version="1.0.0",
               description="تحليل جنائي رقمي حقيقي للملفات: بصمات، ميتاداتا، استرجاع، تزوير، إخفاء.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -98,7 +99,8 @@ async def analyze_upload(file: UploadFile = File(...),
     eid = store.add_evidence(cid, file.filename or "evidence.bin", data, fp,
                              file.content_type or "", actor, source_note)
     artifacts = store.artifacts_dir(eid)
-    rep = analyzer.analyze(data, file.filename or "evidence.bin", artifacts, deep=deep)
+    rep = analyzer.analyze(data, file.filename or "evidence.bin", artifacts, deep=deep,
+                           prnu_registry=cameras)
     rep["evidence"]["evidence_id"] = eid
     rep["evidence"]["case_id"] = cid
     store.save_report(eid, rep)
@@ -106,6 +108,61 @@ async def analyze_upload(file: UploadFile = File(...),
               f"مؤشر الشبهة: {(rep.get('assessment') or {}).get('suspicion_score')} | "
               f"عدد المؤشرات: {(rep.get('assessment') or {}).get('findings_count')}")
     return JSONResponse(rep)
+
+
+# ----------------------------------------------- سجل بصمات الكاميرات (PRNU)
+
+@app.get("/api/prnu/cameras")
+def prnu_list() -> list:
+    """كل الكاميرات المسجّلة ببصماتها وبيانات بنائها."""
+    return cameras.list()
+
+
+@app.post("/api/prnu/cameras")
+async def prnu_add(name: str = Form(...),
+                   camera_id: Optional[str] = Form(None),
+                   notes: str = Form(""),
+                   crop: int = Form(1024),
+                   files: list[UploadFile] = File(...)) -> JSONResponse:
+    """
+    تسجيل كاميرا جديدة ببناء بصمة PRNU من صورها المرجعية.
+
+    يُفضَّل علميًا 20–50 صورة **مسطّحة ساطعة** (سماء/حائط أبيض) بنفس الدقة
+    وبأقل ضغط ممكن. الصور لا تُحفظ؛ تُحفظ البصمة المستخرجة فقط.
+    """
+    blobs, names = [], []
+    for f in files:
+        b = await f.read()
+        if not b:
+            continue
+        if len(b) > MAX_UPLOAD:
+            raise HTTPException(413, f"الملف {f.filename} يتجاوز الحد المسموح")
+        blobs.append(b)
+        names.append(f.filename or "image")
+    if len(blobs) < 2:
+        raise HTTPException(400, "يلزم رفع صورتين على الأقل من نفس الكاميرا "
+                                 "(والموصى به 20 صورة مسطّحة).")
+    cid = camera_id or hashing.crypto_hashes(name.encode("utf-8"))["sha256"][:12]
+    res = cameras.add(cid, name, blobs, names=names, crop=int(crop), notes=notes)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("reason", "تعذّر بناء البصمة"))
+    store.log(None, None, "محقق", "تسجيل بصمة كاميرا PRNU",
+              f"{name} ({cid}) من {res['n_images']} صورة")
+    return JSONResponse(res)
+
+
+@app.delete("/api/prnu/cameras/{cid}")
+def prnu_delete(cid: str) -> dict:
+    return {"deleted": cameras.delete(cid)}
+
+
+@app.post("/api/prnu/identify")
+async def prnu_identify(file: UploadFile = File(...)) -> JSONResponse:
+    """مطابقة صورة مع كل الكاميرات المسجّلة وترتيب النتائج بإحصائية PCE."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "الملف فارغ")
+    return JSONResponse(analyzer.jsonable(cameras.identify(data)))
 
 
 @app.get("/api/evidence")

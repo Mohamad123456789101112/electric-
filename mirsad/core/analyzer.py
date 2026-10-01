@@ -12,8 +12,8 @@ import traceback
 from datetime import datetime, timezone
 
 from . import (carver, containers, documents, entropy, exif as exif_mod, hashing,
-               imaging, jpeg as jpeg_mod, jpegdct, makernote as makernote_mod, recovery,
-               signatures, strings_, timeline)
+               imaging, jpeg as jpeg_mod, jpegdct, makernote as makernote_mod,
+               prnu as prnu_mod, recovery, signatures, strings_, timeline)
 
 
 def _try(name: str, fn, errors: list):
@@ -26,7 +26,7 @@ def _try(name: str, fn, errors: list):
 
 
 def analyze(data: bytes, filename: str, artifacts_dir: str,
-            deep: bool = True) -> dict:
+            deep: bool = True, prnu_registry=None) -> dict:
     t0 = time.time()
     errors: list = []
     rep: dict = {
@@ -182,6 +182,9 @@ def analyze(data: bytes, filename: str, artifacts_dir: str,
                 img_out["preview"] = "preview.png"
             except Exception:
                 pass
+            # بصمة ضجيج المستشعر PRNU (ومطابقتها بسجل الكاميرات إن وُجد)
+            img_out["prnu"] = _try(
+                "prnu", lambda: prnu_mod.analyze(data, registry=prnu_registry), errors)
         rep["image_forensics"] = img_out
 
     # 10) الخط الزمني
@@ -449,6 +452,22 @@ def assess(rep: dict) -> dict:
                 "الكتلة أو إعادة كتابة الملف بأداة لا تحافظ على الإزاحات.",
                 "الوسوم المرفوضة: " + "، ".join(rej[:6]))
             break
+
+    pr = ((rep.get("image_forensics") or {}).get("prnu") or {}).get("identification") or {}
+    for r in pr.get("results", []):
+        if r.get("level") in ("strong", "probable"):
+            # تحديد المصدر ليس «شبهة» بحد ذاته ⇒ وزن صفر، يُعرض كتعريف لا كإنذار
+            add("معلوماتية", 0,
+                "🎯 تحديد الكاميرا ببصمة ضجيج المستشعر (PRNU)",
+                f"الصورة تطابق بصمة الكاميرا المسجّلة «{r.get('camera_name')}». "
+                "هذه الإحصائية فيزيائية ولا تتأثر بتزوير الميتاداتا.",
+                f"PCE = {r.get('pce', 0):.1f} (عتبة التطابق القوي 60) · "
+                f"بصمة مبنية من {r.get('fingerprint_images')} صورة")
+        elif r.get("level") == "strong_shifted":
+            add("عالية", 18, "⚠️ مطابقة PRNU مع إزاحة — الصورة مقصوصة",
+                f"الصورة من الكاميرا «{r.get('camera_name')}» لكن إطارها مزاح "
+                f"بمقدار {r.get('detected_shift')} بكسل عن الأصل — دليل قصّ.",
+                f"PCE عند الإزاحة = {r.get('pce_best_shift', 0):.1f}")
 
     rec = rep.get("recovery", {})
     has_main = bool((jp.get("app_payloads") or {}).get("Exif") or png.get("exif")

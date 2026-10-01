@@ -113,6 +113,38 @@ def html_report(rep: dict, case: dict | None = None, evidence: dict | None = Non
     if not mn_html:
         mn_html = "<p class='muted'>لا يحتوي هذا الملف على وسوم MakerNote.</p>"
 
+    # ---- PRNU
+    pr = (rep.get("image_forensics") or {}).get("prnu") or {}
+    if not pr.get("ok"):
+        prnu_html = (f"<p class='muted'>{_esc(pr.get('reason') or 'غير متاح لهذا الملف.')}</p>")
+    else:
+        prnu_html = _kv_table({
+            "المقطع المستخدم": " × ".join(str(x) for x in pr.get("crop_used", [])),
+            "أبعاد الصورة": " × ".join(str(x) for x in pr.get("image_dims", [])),
+            "طاقة بقايا الضجيج": pr.get("residual_energy"),
+            "الانحراف المعياري للبقايا": pr.get("residual_std"),
+            "متوسط الشدة": pr.get("mean_intensity"),
+            "نسبة البكسلات المشبعة": pr.get("saturated_ratio"),
+            "صالحة كمرجع لبناء بصمة": "نعم" if pr.get("usable_as_reference") else "لا",
+        })
+        prnu_html += f"<p class='muted'>{_esc(pr.get('note'))}</p>"
+        idf = pr.get("identification") or {}
+        if idf:
+            prnu_html += f"<p><b>{_esc(idf.get('verdict'))}</b></p>"
+            rows = "".join(
+                f"<tr><td>{_esc(r.get('camera_name') or r.get('camera_id'))}</td>"
+                f"<td class='mono'>{_esc(round(r.get('pce', 0), 1))}</td>"
+                f"<td class='mono'>{_esc(round(r.get('pce_best_shift', 0), 1))}</td>"
+                f"<td class='mono'>{_esc(round(r.get('ncc_at_zero_shift', 0), 5))}</td>"
+                f"<td>{_esc(r.get('verdict') or r.get('reason'))}</td></tr>"
+                for r in idf.get("results", []))
+            if rows:
+                prnu_html += ("<table><thead><tr><th>الكاميرا</th><th>PCE(0,0)</th>"
+                              "<th>PCE لأفضل إزاحة</th><th>NCC</th><th>الحكم</th></tr></thead>"
+                              f"<tbody>{rows}</tbody></table>")
+            prnu_html += ("<p class='muted'>العتبات المعتمدة: تطابق قوي ≥ 60 (FAR ≈ 10⁻⁵ وفق "
+                          "Goljan 2009) · ترجيح ≥ 25 · مؤشر ضعيف ≥ 10 · مطابقة مع قصّ ≥ 150.</p>")
+
     imgf = rep.get("image_forensics", {})
     imgs = []
     for key, label in (("preview", "معاينة الدليل"),):
@@ -235,14 +267,17 @@ footer{{margin-top:40px;border-top:1px solid #21262d;padding-top:14px;font-size:
 <div class="gallery">{gallery or "<p class='muted'>لا توجد مخرجات بصرية.</p>"}</div>
 {_kv_table({k: _short(v, 300) for k, v in (imgf.get('basic') or {}).items()})}
 
-<h2>11. الملفات المنحوتة والمدمجة</h2>
+<h2>11. بصمة ضجيج المستشعر PRNU (ربط الصورة بكاميرا فيزيائية)</h2>
+{prnu_html}
+
+<h2>12. الملفات المنحوتة والمدمجة</h2>
 <table><thead><tr><th>النوع</th><th>الوصف</th><th>الإزاحة</th><th>الحجم</th><th>SHA-256</th></tr></thead>
 <tbody>{carved_rows or "<tr><td colspan='5' class='muted'>لا شيء</td></tr>"}</tbody></table>
 
-<h2>12. المؤشرات النصية المستخرجة (IOC)</h2>
+<h2>13. المؤشرات النصية المستخرجة (IOC)</h2>
 {ioc_html}
 
-<h2>13. سلسلة الحيازة</h2>
+<h2>14. سلسلة الحيازة</h2>
 <table><thead><tr><th>#</th><th>الوقت (UTC)</th><th>الفاعل</th><th>الإجراء</th><th>التفاصيل</th><th>بصمة القيد</th></tr></thead>
 <tbody>{custody_rows or "<tr><td colspan='6' class='muted'>لا توجد قيود</td></tr>"}</tbody></table>
 

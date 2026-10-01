@@ -53,6 +53,8 @@ $("#btnChain").onclick = async () => {
       <td>${esc(r.actor)}</td><td>${esc(r.action)}</td><td>${esc(r.details)}</td></tr>`).join("")}</tbody></table></div>`);
 };
 
+$("#btnCameras").onclick = () => openCameras();
+
 /* ----------------------------------------------------------------- الرفع */
 const dz = $("#dropzone");
 ["dragenter", "dragover"].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add("drag"); }));
@@ -126,7 +128,7 @@ function render() {
   $("#btnJson").href = `/api/evidence/${EID}`;
   $("#btnPkg").href = `/api/evidence/${EID}/package`;
 
-  tabSummary(); tabHashes(); tabMeta(); tabRecovery(); tabImage(); tabSteg();
+  tabSummary(); tabHashes(); tabMeta(); tabRecovery(); tabImage(); tabPrnu(); tabSteg();
   tabStruct(); tabCarve(); tabStrings(); tabTimeline(); tabEntropy(); tabHex(); tabRaw();
   $$("#tabs button")[0].click();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -249,6 +251,119 @@ function makerNoteCards() {
     h += card(title, b);
   });
   return h;
+}
+
+/* 4-ب) بصمة ضجيج المستشعر PRNU */
+function tabPrnu() {
+  const p = (REPORT.image_forensics || {}).prnu;
+  const el = $("#tab-prnu");
+  if (!el) return;
+  if (!p || !p.ok) {
+    el.innerHTML = card("بصمة ضجيج المستشعر (PRNU)",
+      `<p class="muted">${esc((p && p.reason) || "غير متاح لهذا الملف (يلزم صورة نقطية ≥ 128×128).")}</p>`);
+    return;
+  }
+  let h = card("🎯 ماذا تقيس هذه الصفحة؟",
+    `<p>PRNU هو تفاوت مجهري في حساسية بكسلات المستشعر ناتج عن التصنيع. إنه
+     <b>بصمة فيزيائية فريدة لكل كاميرا</b> مطبوعة في كل صورة تلتقطها، ولا تُزال
+     بالضغط ولا بمسح الميتاداتا. هذه هي القدرة الوحيدة في المنظومة التي تربط صورة
+     بـ<b>جهاز بعينه</b> لا بطراز فقط.</p>
+     <p class="muted">المرجع: Lukáš–Fridrich–Goljan (IEEE TIFS 2006/2008) وإحصائية PCE (SPIE 2009).</p>`);
+
+  h += card("خصائص بقايا الضجيج المستخرجة من هذه الصورة", kvGrid({
+    "المقطع المستخدم": (p.crop_used || []).join(" × "),
+    "أبعاد الصورة": (p.image_dims || []).join(" × "),
+    "طاقة البقايا": p.residual_energy,
+    "الانحراف المعياري للبقايا": p.residual_std,
+    "الطاقة بعد إزالة متوسطات الصفوف/الأعمدة": p.residual_energy_after_zero_mean,
+    "متوسط الشدة": p.mean_intensity,
+    "نسبة البكسلات المشبعة": p.saturated_ratio,
+    "نسبة البكسلات المظلمة": p.dark_ratio,
+    "صالحة كصورة مرجعية لبناء بصمة": p.usable_as_reference ? "نعم ✅" : "لا (مشبعة/مظلمة/غير مناسبة)",
+  }) + `<p class="muted">${esc(p.note)}</p>`);
+
+  const idf = p.identification;
+  if (idf) {
+    const rows = (idf.results || []).map(r => `<tr>
+      <td><b>${esc(r.camera_name || r.camera_id)}</b></td>
+      <td class="mono">${r.ok ? (r.pce || 0).toFixed(1) : "—"}</td>
+      <td class="mono">${r.ok ? (r.pce_best_shift || 0).toFixed(1) : "—"}</td>
+      <td class="mono">${r.ok ? (r.ncc_at_zero_shift || 0).toFixed(4) : "—"}</td>
+      <td>${esc(r.verdict || r.reason || "")}</td></tr>`).join("");
+    h += card(`المطابقة مع الكاميرات المسجّلة (${idf.cameras_compared || 0})`,
+      `<p><b>${esc(idf.verdict || "")}</b></p>` +
+      (rows ? tbl(["الكاميرا", "PCE عند الإزاحة صفر", "PCE لأفضل إزاحة", "NCC", "الحكم"], rows) : "") +
+      `<p class="muted">عتبات القرار: تطابق قوي ≥ 60 · ترجيح ≥ 25 · مؤشر ضعيف ≥ 10 ·
+       مطابقة مع قصّ ≥ 150 (لأن البحث في كل الإزاحات يرفع الإحصائية).</p>`);
+  }
+  h += card("حدود معروفة (تُذكر صراحةً أمام الخبير المضاد)",
+    `<ul>
+      <li>تحديد الكاميرا يتطلب <b>بصمة مرجعية</b> مبنية من صور أخرى لنفس الجهاز — لا يمكن من صورة واحدة.</li>
+      <li>تغيير الأبعاد (تصغير/تكبير) يُفقد المحاذاة؛ النسخة الحالية تقارن مقاطع بنفس الدقة فقط.</li>
+      <li>الصور المشبعة أو المظلمة جدًا لا تحمل إشارة PRNU كافية (الإشارة ضربية في الشدة).</li>
+      <li>الضغط الشديد جدًا والتصفية الرقمية يُضعفان الإشارة ويخفضان PCE.</li>
+    </ul>`);
+  el.innerHTML = h;
+}
+
+/* سجل الكاميرات */
+async function openCameras() {
+  showModal("📷 سجل بصمات الكاميرات (PRNU)", `<div id="camBody">جارٍ التحميل…</div>`);
+  await renderCameras();
+}
+
+async function renderCameras() {
+  let list = [];
+  try { list = await (await fetch("/api/prnu/cameras")).json(); } catch (e) { }
+  const rows = list.map(c => `<tr>
+      <td><b>${esc(c.name)}</b><div class="muted">${esc(c.notes || "")}</div></td>
+      <td class="mono">${esc((c.dims || []).join("×"))}</td>
+      <td class="mono">${esc(c.n_images)}</td>
+      <td class="mono" style="font-size:11px">${esc((c.fingerprint_sha256 || "").slice(0, 16))}…</td>
+      <td class="muted">${esc(c.created_utc || "")}</td>
+      <td><button class="btn ghost" data-del="${esc(c.camera_id)}">حذف</button></td>
+    </tr>`).join("");
+  const body = $("#camBody");
+  body.innerHTML = `
+    <p class="muted">تُبنى بصمة الكاميرا من صور مرجعية مأخوذة بنفس الجهاز.
+      الأفضل علميًا: 20–50 صورة <b>مسطّحة ساطعة</b> (سماء/حائط) بنفس الدقة وأقل ضغط.
+      الصور لا تُحفَظ على الخادم — تُحفظ البصمة المستخرجة فقط.</p>
+    ${list.length ? tbl(["الكاميرا", "أبعاد البصمة", "عدد الصور", "بصمة الملف", "تاريخ البناء", ""], rows)
+      : "<p class='muted'>لا توجد كاميرات مسجّلة بعد.</p>"}
+    <hr>
+    <h4>تسجيل كاميرا جديدة</h4>
+    <div class="dz-meta">
+      <input id="camName" placeholder="اسم الكاميرا (مثال: آيفون المشتبه به — حرز 3)">
+      <input id="camNotes" placeholder="ملاحظة / رقم الحرز">
+      <input id="camCrop" type="number" value="1024" title="حجم المقطع المركزي بالبكسل">
+    </div>
+    <p><input type="file" id="camFiles" multiple accept="image/*"></p>
+    <button class="btn primary" id="camAdd">بناء البصمة وتسجيل الكاميرا</button>
+    <div id="camMsg" class="muted"></div>`;
+  body.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await fetch("/api/prnu/cameras/" + b.dataset.del, { method: "DELETE" });
+    renderCameras();
+  });
+  $("#camAdd").onclick = async () => {
+    const files = $("#camFiles").files;
+    const name = $("#camName").value.trim();
+    const msg = $("#camMsg");
+    if (!name) { msg.textContent = "اكتب اسم الكاميرا أولًا."; return; }
+    if (!files || files.length < 2) { msg.textContent = "اختر صورتين على الأقل من نفس الكاميرا."; return; }
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("notes", $("#camNotes").value);
+    fd.append("crop", $("#camCrop").value || "1024");
+    for (const f of files) fd.append("files", f);
+    msg.textContent = `جارٍ استخراج بقايا الضجيج من ${files.length} صورة وبناء البصمة…`;
+    try {
+      const r = await fetch("/api/prnu/cameras", { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = "خطأ: " + (j.detail || "تعذّر البناء"); return; }
+      msg.textContent = `✅ سُجّلت «${j.name}» من ${j.n_images} صورة.`;
+      renderCameras();
+    } catch (e) { msg.textContent = "خطأ في الاتصال: " + e; }
+  };
 }
 
 /* 4) الاسترجاع */

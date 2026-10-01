@@ -237,6 +237,90 @@ def main() -> int:
           repm["assessment"]["suspicion_score"] <= 20,
           str(repm["assessment"]["suspicion_score"]))
 
+    print("\n=== 14. بصمة ضجيج المستشعر PRNU ===")
+    import math as _math
+    import tempfile as _tf
+    from mirsad.core import prnu as prnu_mod
+    from prnu_validation import capture as _capture, smooth_scene as _scene
+
+    # (أ) صحة مرشّحات دوبيشي المحسوبة عدديًا
+    for nvm in (2, 4, 8):
+        hh, gg = prnu_mod.daubechies(nvm)
+        check(f"db{nvm}: مجموع المرشّح = √2",
+              abs(hh.sum() - _math.sqrt(2)) < 1e-10)
+        check(f"db{nvm}: طاقة المرشّح = 1", abs(np.linalg.norm(hh) - 1) < 1e-10)
+        orth = max(abs(float(np.dot(hh[2 * k:], hh[:len(hh) - 2 * k])))
+                   for k in range(1, len(hh) // 2))
+        check(f"db{nvm}: تعامد الإزاحات الزوجية", orth < 1e-9, f"{orth:.2e}")
+        mom = max(abs(sum(gg[k] * (k ** mm) for k in range(len(gg))))
+                  for mm in range(nvm))
+        check(f"db{nvm}: تلاشي أول {nvm} عزوم", mom < 1e-6, f"{mom:.2e}")
+
+    rngp = np.random.default_rng(7)
+    xx = rngp.random((64, 96)) * 255
+    hh, gg = prnu_mod.daubechies(8)
+    err = float(np.abs(xx - prnu_mod.waverec2(prnu_mod.wavedec2(xx, 4, hh, gg), hh, gg)).max())
+    check("تحويل المويجات: إعادة بناء تامة (4 مستويات)", err < 1e-6, f"{err:.2e}")
+
+    # (ب) تجربة مرجعية كاملة بنموذج المستشعر الفيزيائي I = I⁰(1+K) + Θ
+    S = 256
+    rngp = np.random.default_rng(2024)
+    K_A = rngp.normal(0, 0.02, (S, S))
+    K_B = rngp.normal(0, 0.02, (S, S))
+    flats = [_capture(_scene(rngp, S, S, "flat"), K_A, rngp) for _ in range(10)]
+    fpr = prnu_mod.fingerprint_from_images(flats, crop=S)
+    check("بناء بصمة الكاميرا من صور مرجعية", fpr["ok"] and fpr["n_images"] == 10)
+    Kest = fpr["fingerprint"].astype(float)
+    corr_true = float(np.corrcoef(Kest.ravel(), prnu_mod.zero_mean(K_A).ravel())[0, 1])
+    corr_false = float(np.corrcoef(Kest.ravel(), prnu_mod.zero_mean(K_B).ravel())[0, 1])
+    check("البصمة المستخرجة ترتبط بالنمط الحقيقي", corr_true > 0.3, f"{corr_true:.3f}")
+    check("ولا ترتبط بنمط مستشعر آخر", abs(corr_false) < 0.05, f"{corr_false:.3f}")
+
+    same = prnu_mod.match_image(Kest, _capture(_scene(rngp, S, S, "scene"), K_A, rngp))
+    other = prnu_mod.match_image(Kest, _capture(_scene(rngp, S, S, "scene"), K_B, rngp))
+    check("PCE يتجاوز عتبة التطابق القوي لنفس المستشعر",
+          same["pce"] >= 60 and same["level"] == "strong", f"{same['pce']:.1f}")
+    check("PCE تحت العتبة لمستشعر مختلف (لا إنذار كاذب)",
+          other["pce"] < 25 and other["level"] in ("none", "weak"), f"{other['pce']:.1f}")
+    check("الصورة من نفس المستشعر بعد ضغط JPEG 70 تظل مُطابَقة",
+          prnu_mod.match_image(
+              Kest, _capture(_scene(rngp, S, S, "scene"), K_A, rngp, quality=70))["pce"] >= 60)
+
+    # (ج) كشف القصّ عبر موضع قمة الارتباط
+    BIG = S + 80
+    K_big = rngp.normal(0, 0.02, (BIG, BIG))
+    o = (BIG - S) // 2
+    K_big[o:o + S, o:o + S] = K_A
+    bigb = _capture(_scene(rngp, BIG, BIG, "scene"), K_big, rngp)
+    _im = Image.open(io.BytesIO(bigb)).crop((0, 0, S + 40, S + 40))
+    _b = io.BytesIO(); _im.save(_b, "JPEG", quality=95)
+    sh = prnu_mod.match_image(Kest, _b.getvalue())
+    check("كشف القصّ: القمة تنزاح عن (0,0) مع بقاء التعرّف على الكاميرا",
+          sh["level"] == "strong_shifted" and sh["detected_shift"] == [20, 20],
+          f"{sh['level']} shift={sh.get('detected_shift')} pce={sh['pce_best_shift']:.0f}")
+
+    # (د) سجل الكاميرات الدائم على القرص
+    with _tf.TemporaryDirectory() as _d:
+        reg = prnu_mod.CameraRegistry(_d)
+        added = reg.add("cam_a", "كاميرا الاختبار A", flats, crop=S)
+        check("تسجيل كاميرا وحفظ بصمتها", added["ok"] and len(reg.list()) == 1)
+        ident = reg.identify(_capture(_scene(rngp, S, S, "scene"), K_A, rngp))
+        check("السجل يتعرّف على الكاميرا بالاسم",
+              ident.get("matched_camera") == "كاميرا الاختبار A", str(ident.get("verdict"))[:90])
+        ident2 = reg.identify(_capture(_scene(rngp, S, S, "scene"), K_B, rngp))
+        check("السجل لا ينسب صورة كاميرا أخرى خطأً",
+              not ident2.get("matched_camera"), str(ident2.get("verdict"))[:90])
+        rep_p = analyzer.analyze(_capture(_scene(rngp, S, S, "scene"), K_A, rngp),
+                                 "prnu_case.jpg", TMP, prnu_registry=reg)
+        check("ربط PRNU بالتقرير الكامل بلا أخطاء", not rep_p["errors"], str(rep_p["errors"])[:150])
+        check("نتيجة التعرّف تظهر داخل التقرير",
+              (rep_p["image_forensics"]["prnu"]["identification"].get("matched_camera")
+               == "كاميرا الاختبار A"))
+        check("التعرّف على الكاميرا لا يرفع مؤشر الشبهة",
+              all(f["weight"] == 0 for f in rep_p["assessment"]["findings"]
+                  if "PRNU" in f["title"]))
+        check("حذف الكاميرا من السجل", reg.delete("cam_a") and reg.list() == [])
+
     print("\n" + "=" * 60)
     print(f"النتيجة: {len(PASS)} ناجح / {len(FAIL)} فاشل")
     if FAIL:
