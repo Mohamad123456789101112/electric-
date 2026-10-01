@@ -109,7 +109,7 @@ class CaseStore:
         d = self.evidence_dir(evidence_id)
         p = os.path.join(d, "report.json")
         with open(p, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=1)
+            json.dump(report, f, ensure_ascii=False, indent=1, default=str)
         score = (report.get("assessment") or {}).get("suspicion_score")
         self.conn.execute("UPDATE evidence SET report_path=?, suspicion_score=? WHERE id=?",
                           (p, score, evidence_id))

@@ -174,14 +174,35 @@ def identify(data: bytes, filename: str = "") -> TypeID:
                 best = tid
 
     if best is None:
-        # نص؟
-        sample = data[:4096]
-        if sample and all(c in b"\t\n\r\f\v" or 32 <= c < 127 or c >= 0xC2 for c in sample):
-            try:
-                sample.decode("utf-8")
-                best = TypeID("text/plain", "txt", "ملف نصي (UTF-8/ASCII)", 0.6, "", 0)
-            except UnicodeDecodeError:
-                pass
+        # نص؟ (نحاول فك الترميز فعليًا ونقيس نسبة المحارف المطبوعة)
+        sample = data[:8192]
+        if sample:
+            txt = None
+            enc = None
+            for e in ("utf-8", "utf-16-le", "utf-16-be"):
+                for cut in (0, 1, 2, 3):      # قد تُقطع العيّنة داخل محرف متعدد البايتات
+                    try:
+                        txt = sample[:len(sample) - cut].decode(e)
+                        enc = e
+                        break
+                    except UnicodeDecodeError:
+                        txt = None
+                if txt is not None:
+                    break
+            if txt is not None:
+                printable = sum(1 for ch in txt if ch.isprintable() or ch in "\t\n\r")
+                if printable / max(1, len(txt)) > 0.95:
+                    low = txt.lstrip()[:200].lower()
+                    kind, desc = "txt", f"ملف نصي ({enc.upper()})"
+                    if low.startswith(("<?xml", "<!doctype", "<html", "<svg")):
+                        kind, desc = "xml", "مستند XML/HTML"
+                    elif low.startswith(("{", "[")) and ('":' in txt[:2000] or "': " in txt[:2000]):
+                        kind, desc = "json", "بيانات JSON"
+                    elif low.startswith(("#!/", "import ", "from ", "def ", "#include", "package ",
+                                         "using ", "<?php", "function ")):
+                        kind, desc = "src", "شيفرة مصدرية نصية"
+                    best = TypeID("text/plain" if kind != "xml" else "text/xml",
+                                  kind, desc, 0.7, "", 0)
     if best is None:
         best = TypeID()
         best.notes.append("لم يُطابق أي توقيع معروف — قد يكون ملفًا مشفرًا أو مضغوطًا أو تالفًا أو خامًا.")
@@ -206,10 +227,26 @@ def identify(data: bytes, filename: str = "") -> TypeID:
 
     declared = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if declared:
-        fam = {"jpg", "jpeg"}
-        same = (declared == best.ext) or (declared in fam and best.ext in fam) or \
-               (declared in ("tif", "tiff") and best.ext in ("tif", "tiff")) or \
-               (declared in ("htm", "html") and best.ext == "txt")
+        # عائلات الامتدادات المتكافئة (لا تُعد تمويهًا)
+        families = [
+            {"jpg", "jpeg", "jpe", "jfif"},
+            {"tif", "tiff"},
+            {"htm", "html", "xhtml", "xml", "svg", "rss", "plist"},
+            {"txt", "src", "md", "csv", "tsv", "log", "ini", "cfg", "conf", "yml", "yaml",
+             "py", "js", "mjs", "ts", "css", "c", "h", "cpp", "hpp", "java", "cs", "go",
+             "rs", "rb", "php", "pl", "sh", "bash", "bat", "ps1", "sql", "r", "m", "lua",
+             "swift", "kt", "toml", "env", "gitignore", "srt", "vtt", "asc", "pem", "json",
+             "geojson", "ndjson", "properties", "gradle", "make", "mk", "dockerfile", "tex"},
+            {"zip", "docx", "xlsx", "pptx", "apk", "jar", "epub", "odf", "odt", "ods", "odp"},
+            {"mp4", "m4v", "m4a", "mov", "3gp", "heic", "heif", "avif", "cr3"},
+            {"ole", "doc", "xls", "ppt", "msi", "msg"},
+            {"exe", "dll", "sys", "ocx", "scr", "cpl"},
+            {"sqlite", "sqlite3", "db", "db3"},
+            {"pcap", "pcapng", "cap"},
+            {"riff", "wav", "avi", "webp"},
+        ]
+        same = declared == best.ext or any(
+            declared in f and best.ext in f for f in families)
         if not same:
             best.extension_mismatch = True
             best.notes.append(

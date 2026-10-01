@@ -207,13 +207,13 @@ def package(eid: str):
     case = store.get_case(ev["case_id"]) if ev["case_id"] else None
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("report.json", json.dumps(rep, ensure_ascii=False, indent=1))
+        z.writestr("report.json", json.dumps(rep, ensure_ascii=False, indent=1, default=str))
         z.writestr("report.html", report_mod.html_report(rep, case, ev, custody, "artifacts/"))
         z.writestr("summary.txt", report_mod.text_summary(rep))
         z.writestr("chain_of_custody.json", json.dumps(
             {"evidence": ev, "case": case, "custody": custody,
              "chain_verification": store.verify_chain(ev["case_id"])},
-            ensure_ascii=False, indent=1))
+            ensure_ascii=False, indent=1, default=str))
         ad = store.artifacts_dir(eid)
         for n in sorted(os.listdir(ad)):
             z.write(os.path.join(ad, n), f"artifacts/{n}")

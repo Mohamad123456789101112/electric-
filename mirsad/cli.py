@@ -40,7 +40,7 @@ def main(argv=None) -> int:
     print(report_mod.text_summary(rep))
     if a.json:
         with open(a.json, "w", encoding="utf-8") as f:
-            json.dump(rep, f, ensure_ascii=False, indent=1)
+            json.dump(rep, f, ensure_ascii=False, indent=1, default=str)
         print(f"\n[+] التقرير JSON: {a.json}")
     if a.html:
         with open(a.html, "w", encoding="utf-8") as f:

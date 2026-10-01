@@ -152,7 +152,40 @@ def analyze(data: bytes, filename: str, artifacts_dir: str,
     # 11) التقييم النهائي
     rep["assessment"] = _try("assessment", lambda: assess(rep), errors) or {}
     rep["evidence"]["analysis_seconds"] = round(time.time() - t0, 2)
-    return rep
+    return jsonable(rep)
+
+
+def jsonable(obj, _depth: int = 0):
+    """تحويل التقرير إلى أنواع قابلة للتسلسل (JSON) دون فقدان أي معلومة مقروءة."""
+    if _depth > 40:
+        return str(obj)
+    if obj is None or isinstance(obj, (bool, int, str)):
+        return obj
+    if isinstance(obj, float):
+        return obj if obj == obj and abs(obj) != float("inf") else str(obj)
+    if isinstance(obj, bytes):
+        return {"_bytes": len(obj), "hex_preview": obj[:64].hex(" ")}
+    if isinstance(obj, dict):
+        return {str(k): jsonable(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [jsonable(v, _depth + 1) for v in obj]
+    try:
+        import numpy as _np
+        if isinstance(obj, _np.integer):
+            return int(obj)
+        if isinstance(obj, _np.floating):
+            return float(obj)
+        if isinstance(obj, _np.ndarray):
+            return jsonable(obj.tolist(), _depth + 1)
+    except Exception:
+        pass
+    for conv in (int, float):          # مثل PIL IFDRational
+        try:
+            v = conv(obj)
+            return round(v, 6) if conv is float else v
+        except Exception:
+            continue
+    return str(obj)
 
 
 def _strip_bytes(d: dict) -> dict:
@@ -430,7 +463,13 @@ def assess(rep: dict) -> dict:
         add("متوسطة", 9, "شذوذ في العشوائية", a["note"],
             f"إزاحة {a['offset']} ، إنتروبيا {a['entropy']}")
 
-    carved = [x for x in rep.get("carving", []) if x.get("extracted")]
+    # استبعاد الملفات التي تنتمي أصلًا لبنية الحاوية نفسها (مثل إدخالات ZIP داخل أرشيف)
+    own = {"zip": {"zip"}, "docx": {"zip", "xml"}, "xlsx": {"zip", "xml"}, "pptx": {"zip", "xml"},
+           "apk": {"zip", "xml", "dex"}, "jar": {"zip", "xml"}, "epub": {"zip", "xml"},
+           "odf": {"zip", "xml"}, "jpg": {"jpeg"}, "jpeg": {"jpeg"}, "png": {"png"},
+           "pdf": {"pdf", "xml"}, "tif": {"tiff"}, "gz": {"gzip"}}.get(
+               (rep.get("type") or {}).get("extension_real", ""), set())
+    carved = [x for x in rep.get("carving", []) if x.get("extracted") and x["type"] not in own]
     if carved:
         add("عالية", 16, "ملفات مدمجة مستخرجة بالنحت",
             "عُثر على ملفات كاملة مخبّأة داخل الدليل واستُخرجت فعليًا.",
