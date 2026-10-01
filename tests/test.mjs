@@ -1,6 +1,7 @@
 /* اختبارات إلكترو بلوك — المترجم ومولد كود MicroPython
    تشغيل: node tests/test.mjs */
-import { compileProgram, FakeBlock } from '../js/compiler.js';
+import { compileProgram } from '../js/compiler.js';
+import { FakeBlock } from './fakeblock.mjs';
 import { generatePython } from '../js/pygen.js';
 
 let passed = 0, failed = 0;

@@ -1,5 +1,6 @@
 /* توليد ملفات بايثون من برامج الاختبار للتحقق منها بـ python3 حقيقي */
-import { FakeBlock, compileProgram } from '../js/compiler.js';
+import { compileProgram } from '../js/compiler.js';
+import { FakeBlock } from './fakeblock.mjs';
 import { generatePython } from '../js/pygen.js';
 import { mkdirSync, writeFileSync } from 'fs';
 
