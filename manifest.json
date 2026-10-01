@@ -1,0 +1,18 @@
+{
+  "name": "إلكترو بلوك — برمج ESP32 بالبلوكات",
+  "short_name": "إلكترو بلوك",
+  "description": "اسحب بلوكات وارفع البرنامج على شريحة ESP32 من موبايلك مباشرة — من غير لاب توب",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0d14",
+  "theme_color": "#0a0d14",
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

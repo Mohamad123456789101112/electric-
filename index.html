@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <title>إلكترو بلوك — برمج الـ ESP32 بالبلوكات من موبايلك</title>
+  <meta name="description" content="اسحب بلوكات وارفع البرنامج على شريحة ESP32 من الموبايل مباشرة — من غير لاب توب. فيه محاكي مدمج وأمثلة جاهزة." />
+  <meta name="theme-color" content="#0a0d14" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="img/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- ============ الهيدر ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div class="brand-text">
+        <div class="brand-title">إلكترو بلوك</div>
+        <div class="brand-sub">برمج شريحتك من موبايلك</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="connPill" class="conn-pill">⚫ غير متصل</span>
+      <button id="btnExamples" class="icon-btn" title="أمثلة جاهزة">📚</button>
+      <button id="btnNew" class="icon-btn" title="مشروع جديد">🧹</button>
+      <button id="btnSaveFile" class="icon-btn" title="حفظ المشروع في ملف">💾</button>
+      <button id="btnOpenFile" class="icon-btn" title="فتح مشروع">📂</button>
+      <button id="btnHelp" class="icon-btn" title="مساعدة">❓</button>
+      <button id="btnUpload" class="cta-btn">📱 اشحن على الشريحة</button>
+    </div>
+  </header>
+
+  <!-- ============ المحتوى ============ -->
+  <main class="content">
+
+    <!-- تبويب البلوكات -->
+    <section id="tab-blocks" class="tab-panel active">
+      <div id="blocklyWrap" class="blockly-wrap">
+        <div id="blocklyDiv"></div>
+      </div>
+      <div id="warnings" class="warnings" style="display:none"></div>
+    </section>
+
+    <!-- تبويب الكود -->
+    <section id="tab-code" class="tab-panel">
+      <div class="code-head">
+        <div class="code-title">🐍 كود MicroPython — اللي هيترفع على الشريحة</div>
+        <div class="code-actions">
+          <button id="btnCopyCode" class="mini-btn">📋 نسخ</button>
+          <button id="btnDownloadCode" class="mini-btn">💾 تحميل main.py</button>
+        </div>
+      </div>
+      <div class="code-box" dir="ltr">
+        <pre id="codeArea"></pre>
+        <pre id="codeHl" class="code-hl"></pre>
+      </div>
+      <p class="code-note">💡 الكود ده بيتكتب تلقائي كل ما تغيّر بلوك — وهو اللي بينزل على الشريحة باسم <code>main.py</code> وبيشتغل لوحده حتى لو فصلت الموبايل.</p>
+    </section>
+
+    <!-- تبويب المحاكي -->
+    <section id="tab-sim" class="tab-panel">
+      <div class="sim-toolbar">
+        <div id="simAddBar" class="sim-addbar"></div>
+        <div class="sim-runwrap">
+          <button id="simRun" class="run-btn">▶️ تشغيل</button>
+          <button id="simStop" class="stop-btn hidden">⏹️ إيقاف</button>
+        </div>
+      </div>
+      <div id="simBoard" class="sim-board"></div>
+      <div class="sim-mon-head">
+        <span>🖥️ الشاشة — اللي بيطبعه برنامجك</span>
+        <button id="simClearMon" class="mini-btn">🧹 مسح</button>
+      </div>
+      <div id="simMonitor" class="monitor" dir="ltr"></div>
+    </section>
+
+    <!-- تبويب الشاشة التسلسلية -->
+    <section id="tab-monitor" class="tab-panel">
+      <div class="dev-toolbar">
+        <span class="dev-hint">🔌 الشاشة التسلسلية — بتفتح لما توصل الشريحة</span>
+        <div class="dev-actions">
+          <button id="devRerun" class="mini-btn">🔄 إعادة تشغيل</button>
+          <button id="devStop" class="mini-btn">⏹️ إيقاف البرنامج</button>
+          <button id="devClearMain" class="mini-btn">🗑️ مسح main.py</button>
+          <button id="devClearMon" class="mini-btn">🧹 مسح الشاشة</button>
+          <button id="devDisconnect" class="mini-btn danger">🔌 فصل</button>
+        </div>
+      </div>
+      <div id="deviceMonitor" class="monitor big" dir="ltr"></div>
+    </section>
+  </main>
+
+  <!-- ============ شريط التبويبات ============ -->
+  <nav class="tabbar">
+    <button id="nav-blocks" class="tab active"><span class="tab-ico">🧩</span><span>البلوكات</span></button>
+    <button id="nav-code" class="tab"><span class="tab-ico">💻</span><span>الكود</span></button>
+    <button id="nav-sim" class="tab"><span class="tab-ico">🕹️</span><span>المحاكي</span></button>
+    <button id="nav-monitor" class="tab disabled"><span class="tab-ico">🖥️</span><span>الشاشة</span></button>
+  </nav>
+
+  <!-- ============ مودال الرفع على الشريحة ============ -->
+  <div id="wizardModal" class="modal-back">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>📱 الرفع على الشريحة</h2>
+        <button class="icon-btn" data-close>✕</button>
+      </div>
+
+      <div id="wzUnsupported" class="modal-body" style="display:none">
+        <div class="wz-note bad">
+          المتصفح ده مش بيدعم الاتصال بالمنافذ التسلسلية 😔<br />
+          محتاج <b>Chrome أو Edge على أندرويد أو كمبيوتر</b>. للأسف الآيفون وسفاري وفايرفوكس مش بيدعموا الميزة دي.<br /><br />
+          ✨ تنفع تجرب <b>المحاكي</b> من تبويب "المحاكي" في كل المتصفحات!
+        </div>
+      </div>
+
+      <div id="wzBody" class="modal-body">
+        <!-- اختيار المنفذ -->
+        <div id="wz-choose">
+          <ol class="steps">
+            <li>وصّل الشريحة بالموبايل <b>بكابل OTG</b> (أو بكيبل عادي لو من كمبيوتر)</li>
+            <li>دوس على زر التوصيل تحت واختار المنفذ اللي هيظهرلك</li>
+            <li>أول مرة هستخدم دقيقة لتثبيت النظام — وبعدها أي تعديل بينزل في ثواني</li>
+          </ol>
+          <button id="wzBtnConnect" class="cta-btn wide">🔌 توصيل الشريحة</button>
+        </div>
+
+        <!-- فحص -->
+        <div id="wz-checking" style="display:none">
+          <div class="spinner"></div>
+          <p class="center">⏳ بتتكلم مع الشريحة وبشوف النظام…</p>
+        </div>
+
+        <!-- تثبيت النظام -->
+        <div id="wz-flash" style="display:none">
+          <div class="wz-note">
+            الشريحة اللي وصلتها مفيهاش نظام MicroPython (أو مش بترد).<br />
+            هستخدم دقيقة تقريبًا أثبّته — <b>مرة واحدة بس</b> وبعدين مش هتحتاجها تاني.
+          </div>
+          <label class="field-label">نوع الشريحة (بتتحدد تلقائيًا في الغالب):</label>
+          <select id="chipSelect" class="chip-select">
+            <option value="esp32" selected>ESP32 الكلاسيكي (الأشهر)</option>
+            <option value="esp32c3">ESP32-C3</option>
+            <option value="esp32s3">ESP32-S3</option>
+          </select>
+          <button id="wzBtnFlash" class="cta-btn wide">🚀 ابدأ تثبيت النظام</button>
+          <div class="wz-note small">⚠️ التثبيت بيمسح البرامج اللي على الشريحة (لو فيها حاجة مهمة، اعمل نسخة احتياطية الأول)</div>
+        </div>
+
+        <!-- جاري التثبيت -->
+        <div id="wz-flashing" style="display:none">
+          <p class="center">🚀 بثبّت النظام… <b>متلمسش الكابل!</b></p>
+          <div class="progress"><div id="flashBar" class="progress-bar" style="width:0%"></div></div>
+          <pre id="flashLog" class="flash-log" dir="ltr"></pre>
+        </div>
+
+        <!-- جاري الرفع -->
+        <div id="wz-uploading" style="display:none">
+          <div class="spinner"></div>
+          <p class="center">⏳ بكتب برنامجك على الشريحة…</p>
+        </div>
+
+        <!-- متصل بالفعل -->
+        <div id="wz-connected" style="display:none">
+          <div class="wz-note good">🟢 الشريحة متصلة وجاهزة!</div>
+          <button id="wzBtnUploadNow" class="cta-btn wide">⚡ اشحن البرنامج الحالي</button>
+          <button id="wzBtnReinstall" class="ghost-btn wide">🔄 إعادة تثبيت النظام (متقدم)</button>
+        </div>
+
+        <div class="wz-footer">
+          <button id="wzBtnClose" class="ghost-btn">إلغاء / إغلاق</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ مودال الأمثلة ============ -->
+  <div id="examplesModal" class="modal-back">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>📚 أمثلة جاهزة</h2>
+        <button class="icon-btn" data-close>✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted">اختار مثال — البلوكات والمحاكي هيتظبطوا على طول. جرّب في المحاكي الأول وبعدين اشحن على الشريحة 💪</p>
+        <div id="examplesGrid" class="ex-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ مودال المساعدة ============ -->
+  <div id="helpModal" class="modal-back">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>❓ إزاي تستخدم الموقع؟</h2>
+        <button class="icon-btn" data-close>✕</button>
+      </div>
+      <div class="modal-body help-body">
+        <div class="help-step"><span class="help-num">1</span><div><b>اسحب البلوكات</b> — من القايمة الجانبية لمساحة الشغل. ابدأ ببلوك "🚀 عند البدء" أو "🔁 دائمًا".</div></div>
+        <div class="help-step"><span class="help-num">2</span><div><b>جرّب في المحاكي</b> — تبويب "المحاكي": ضيف ليد وزر وسيرفو… ودوس ▶️ تشغيل. البلوكات هتشتغل قدامك.</div></div>
+        <div class="help-step"><span class="help-num">3</span><div><b>اشحن على الشريحة</b> — زر "📱 اشحن على الشريحة":<br />
+          • محتاج <b>أندرويد</b> أو <b>كمبيوتر</b> مع <b>Chrome / Edge</b><br />
+          • محتاج <b>كابل OTG</b> يوصل موبايلك بالـ ESP32<br />
+          • أول مرة: الموقع هيثبّت نظام MicroPython (دقيقة واحدة)<br />
+          • بعد كده: أي تعديل على البلوكات ينزل على الشريحة في ثواني</div></div>
+        <div class="help-step"><span class="help-num">4</span><div><b>الشريحة تشتغل لوحها!</b> 🎉 برنامجك بيتسجل في <code>main.py</code> — يعني لو فصلت الموبايل، الشريحة تكمل شغالة، ولما توصل الكهربا تشتغل من الأول تلقائيًا.</div></div>
+        <div class="wz-note small">
+          💡 نصايح: لو زر التوصيل مش بيظهر منفذ، جرّب كابل تاني (فيه كابلات شحن من غير داتا) — ولو الموقع شغال جوه معاينة، افتحه في تاب جديد.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" accept=".json" style="display:none" />
+  <div id="toasts" class="toasts"></div>
+
+  <script src="libs/blockly/blockly.min.js"></script>
+  <script src="libs/blockly/msg/ar.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
